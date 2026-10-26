@@ -139,6 +139,65 @@ class DBManager:
             )
             ''')
 
+            # 专属同步令牌不进入逻辑备份；只保存哈希，绑定账号及其闲鱼身份。
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS desktop_bridge_tokens (
+                cookie_id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                account_unb TEXT NOT NULL,
+                token_hash TEXT UNIQUE NOT NULL,
+                created_at REAL NOT NULL,
+                expires_at REAL NOT NULL,
+                last_seen_at REAL,
+                last_sync_at REAL,
+                last_cookie_hash TEXT,
+                pending_cookie_hash TEXT,
+                FOREIGN KEY (cookie_id) REFERENCES cookies(id) ON DELETE CASCADE
+            )
+            ''')
+            if 'pending_cookie_hash' not in {
+                row[1] for row in cursor.execute('PRAGMA table_info(desktop_bridge_tokens)').fetchall()
+            }:
+                cursor.execute('ALTER TABLE desktop_bridge_tokens ADD COLUMN pending_cookie_hash TEXT')
+            bridge_columns = {row[1] for row in cursor.execute('PRAGMA table_info(desktop_bridge_tokens)')}
+            for column, declaration in (
+                ('query_enabled', 'INTEGER NOT NULL DEFAULT 0'),
+                ('query_ready', 'INTEGER NOT NULL DEFAULT 0'),
+                ('last_query_seen_at', 'REAL'),
+            ):
+                if column not in bridge_columns:
+                    cursor.execute(f'ALTER TABLE desktop_bridge_tokens ADD COLUMN {column} {declaration}')
+            # 短期查询任务不包含 Cookie，且不进入逻辑备份。
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS desktop_bridge_jobs (
+                    id TEXT PRIMARY KEY, cookie_id TEXT NOT NULL,
+                    token_hash TEXT NOT NULL, request TEXT NOT NULL,
+                    deadline REAL NOT NULL, claimed INTEGER NOT NULL DEFAULT 0,
+                    response TEXT
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS desktop_jobs_account ON desktop_bridge_jobs(token_hash, deadline)')
+            cursor.execute('''
+                CREATE TRIGGER IF NOT EXISTS delete_desktop_jobs_with_pairing
+                AFTER DELETE ON desktop_bridge_tokens BEGIN
+                    DELETE FROM desktop_bridge_jobs WHERE token_hash = OLD.token_hash;
+                END
+            ''')
+            # 本项目部分连接未开启 foreign_keys，触发器也覆盖备份恢复/删用户。
+            cursor.execute('''
+            CREATE TRIGGER IF NOT EXISTS delete_desktop_bridge_with_cookie
+            AFTER DELETE ON cookies BEGIN
+                DELETE FROM desktop_bridge_tokens WHERE cookie_id = OLD.id;
+            END
+            ''')
+            cursor.execute('''
+            CREATE TRIGGER IF NOT EXISTS revoke_desktop_bridge_on_owner_change
+            AFTER UPDATE OF user_id ON cookies
+            WHEN NEW.user_id != OLD.user_id BEGIN
+                DELETE FROM desktop_bridge_tokens WHERE cookie_id = OLD.id;
+            END
+            ''')
+
             
             # 创建keywords表
             cursor.execute('''
@@ -1061,6 +1120,30 @@ class DBManager:
                     )
                     logger.info(f"数据库迁移完成：添加{column_name}列")
 
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS item_ai_prompts (
+                    cookie_id TEXT NOT NULL,
+                    item_id TEXT NOT NULL,
+                    prompt TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (cookie_id, item_id),
+                    FOREIGN KEY (cookie_id) REFERENCES cookies(id) ON DELETE CASCADE
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS ai_reply_images (
+                    cookie_id TEXT PRIMARY KEY,
+                    rules TEXT NOT NULL DEFAULT '[]',
+                    FOREIGN KEY (cookie_id) REFERENCES cookies(id) ON DELETE CASCADE
+                )
+            ''')
+            cursor.execute("""CREATE TRIGGER IF NOT EXISTS delete_ai_images_with_cookie
+                AFTER DELETE ON cookies BEGIN
+                    DELETE FROM ai_reply_images WHERE cookie_id = OLD.id;
+                END""")
+            cursor.execute("""CREATE TRIGGER IF NOT EXISTS revoke_ai_images_on_owner_change
+                AFTER UPDATE OF user_id ON cookies WHEN NEW.user_id != OLD.user_id BEGIN
+                    DELETE FROM ai_reply_images WHERE cookie_id = OLD.id;
+                END""")
             cursor.execute("PRAGMA table_info(ai_reply_settings)")
             ai_setting_columns = [column[1] for column in cursor.fetchall()]
             ai_context_columns = {
@@ -2119,6 +2202,18 @@ class DBManager:
         return cursor.executemany(sql, params_list)
     
     # -------------------- Cookie操作 --------------------
+    def _revoke_changed_desktop_identity(self, cursor, cookie_id, cookie_value, user_id=None):
+        """账号被替换时永久撤销旧连接；不记录 Cookie 或令牌。调用方持有锁。"""
+        row = cursor.execute(
+            'SELECT user_id, account_unb FROM desktop_bridge_tokens WHERE cookie_id = ?',
+            (cookie_id,),
+        ).fetchone()
+        if not row:
+            return
+        fields = dict(part.strip().split('=', 1) for part in cookie_value.split(';') if '=' in part)
+        if fields.get('unb') != row[1] or (user_id is not None and int(user_id) != row[0]):
+            cursor.execute('DELETE FROM desktop_bridge_tokens WHERE cookie_id = ?', (cookie_id,))
+
     def save_cookie(self, cookie_id: str, cookie_value: str, user_id: int = None) -> bool:
         """保存Cookie到数据库，如存在则更新"""
         with self.lock:
@@ -2137,6 +2232,7 @@ class DBManager:
                         admin_user = cursor.fetchone()
                         user_id = admin_user[0] if admin_user else 1
 
+                self._revoke_changed_desktop_identity(cursor, cookie_id, cookie_value, user_id)
                 self._execute_sql(cursor,
                     "INSERT OR REPLACE INTO cookies (id, value, user_id) VALUES (?, ?, ?)",
                     (cookie_id, cookie_value, user_id)
@@ -2166,6 +2262,8 @@ class DBManager:
                 cursor = self.conn.cursor()
                 # 删除关联的关键字
                 self._execute_sql(cursor, "DELETE FROM keywords WHERE cookie_id = ?", (cookie_id,))
+                self._execute_sql(cursor, "DELETE FROM item_ai_prompts WHERE cookie_id = ?", (cookie_id,))
+                self._execute_sql(cursor, "DELETE FROM ai_reply_images WHERE cookie_id = ?", (cookie_id,))
                 # 删除Cookie
                 self._execute_sql(cursor, "DELETE FROM cookies WHERE id = ?", (cookie_id,))
                 self.conn.commit()
@@ -2472,6 +2570,8 @@ class DBManager:
                     params.append(cookie_id)
                     sql = f"UPDATE cookies SET {', '.join(update_fields)} WHERE id = ?"
                     
+                    if cookie_value is not None:
+                        self._revoke_changed_desktop_identity(cursor, cookie_id, cookie_value)
                     self._execute_sql(cursor, sql, tuple(params))
                     self.conn.commit()
                     logger.info(f"更新账号 {cookie_id} 信息成功: {update_fields}")
@@ -2807,6 +2907,22 @@ class DBManager:
                 return {}
 
     # -------------------- AI回复设置操作 --------------------
+    def get_item_ai_prompt(self, cookie_id: str, item_id: str) -> str:
+        with self.lock:
+            row = self.conn.execute(
+                'SELECT prompt FROM item_ai_prompts WHERE cookie_id = ? AND item_id = ?',
+                (cookie_id, item_id),
+            ).fetchone()
+            return row[0] if row else ''
+
+    def save_item_ai_prompt(self, cookie_id: str, item_id: str, prompt: str):
+        with self.lock:
+            self.conn.execute('''
+                INSERT INTO item_ai_prompts (cookie_id, item_id, prompt) VALUES (?, ?, ?)
+                ON CONFLICT(cookie_id, item_id) DO UPDATE SET prompt = excluded.prompt
+            ''', (cookie_id, item_id, prompt))
+            self.conn.commit()
+
     def save_ai_reply_settings(self, cookie_id: str, settings: dict) -> bool:
         """保存AI回复设置"""
         with self.lock:
@@ -3870,7 +3986,7 @@ class DBManager:
 
                         # 备份其他相关表
                         related_tables = ['cookie_status', 'default_replies', 'message_notifications',
-                                        'item_info', 'ai_reply_settings', 'ai_conversations']
+                                        'item_info', 'ai_reply_settings', 'ai_conversations', 'item_ai_prompts', 'ai_reply_images']
 
                         for table in related_tables:
                             cursor.execute(f"SELECT * FROM {table} WHERE cookie_id IN ({placeholders})", user_cookie_ids)
@@ -3886,7 +4002,7 @@ class DBManager:
                         'cookies', 'keywords', 'cookie_status', 'cards',
                         'delivery_rules', 'default_replies', 'notification_channels',
                         'message_notifications', 'system_settings', 'item_info',
-                        'ai_reply_settings', 'ai_conversations', 'ai_item_cache'
+                        'ai_reply_settings', 'ai_conversations', 'ai_item_cache', 'item_ai_prompts', 'ai_reply_images'
                     ]
 
                     for table in tables:
@@ -3929,7 +4045,7 @@ class DBManager:
 
                         # 删除用户相关数据
                         related_tables = ['message_notifications', 'default_replies', 'item_info',
-                                        'cookie_status', 'keywords', 'ai_conversations', 'ai_reply_settings']
+                                        'cookie_status', 'keywords', 'ai_conversations', 'ai_reply_settings', 'item_ai_prompts', 'ai_reply_images']
 
                         for table in related_tables:
                             cursor.execute(f"DELETE FROM {table} WHERE cookie_id IN ({placeholders})", user_cookie_ids)
@@ -3941,7 +4057,7 @@ class DBManager:
                     tables = [
                         'message_notifications', 'notification_channels', 'default_replies',
                         'delivery_rules', 'cards', 'item_info', 'cookie_status', 'keywords',
-                        'ai_conversations', 'ai_reply_settings', 'ai_item_cache', 'cookies'
+                        'ai_conversations', 'ai_reply_settings', 'ai_item_cache', 'item_ai_prompts', 'ai_reply_images', 'cookies'
                     ]
 
                     for table in tables:
@@ -3956,7 +4072,7 @@ class DBManager:
                     if table_name not in ['cookies', 'keywords', 'cookie_status', 'cards',
                                         'delivery_rules', 'default_replies', 'notification_channels',
                                         'message_notifications', 'system_settings', 'item_info',
-                                        'ai_reply_settings', 'ai_conversations', 'ai_item_cache']:
+                                        'ai_reply_settings', 'ai_conversations', 'ai_item_cache', 'item_ai_prompts', 'ai_reply_images']:
                         continue
 
                     columns = table_data['columns']
@@ -5060,6 +5176,8 @@ class DBManager:
                     FROM delivery_rules dr
                     LEFT JOIN cards c ON dr.card_id = c.id
                     WHERE dr.enabled = 1 AND c.enabled = 1
+                      AND dr.user_id = (SELECT user_id FROM cookies WHERE id = ?)
+                      AND c.user_id = dr.user_id
                       AND (
                         (dr.cookie_id = ? AND dr.item_id = ?)
                         OR (
@@ -5075,6 +5193,7 @@ class DBManager:
                     ''',
                     (
                         cookie_id, item_id, cookie_id,
+                        cookie_id,
                         cookie_id, item_id,
                         cookie_id, search_text, search_text,
                         search_text, search_text,
@@ -5084,6 +5203,12 @@ class DBManager:
                 if not rows:
                     return []
 
+                # LIKE 中的 % / _ 是通配符，反向 LIKE 还会把空搜索串匹配为全部规则。
+                # 通用规则按字面关键词包含匹配，再取同作用域最长关键词。
+                rows = [row for row in rows if row[21] == 0 or
+                        (row[1] and row[1].casefold() in (search_text or '').casefold())]
+                if not rows:
+                    return []
                 best_scope = rows[0][21]
                 rows = [row for row in rows if row[21] == best_scope]
                 if spec_name and spec_value:
@@ -5093,6 +5218,10 @@ class DBManager:
                     ]
                 else:
                     rows = [row for row in rows if not bool(row[16])]
+
+                if rows and best_scope > 0:
+                    longest = max(len(row[1]) for row in rows)
+                    rows = [row for row in rows if len(row[1]) == longest]
 
                 rules = []
                 for row in rows:
@@ -5463,7 +5592,7 @@ class DBManager:
                 cursor = self.conn.cursor()
 
                 # 获取卡券的批量数据
-                self._execute_sql(cursor, "SELECT data_content, name, user_id FROM cards WHERE id = ? AND type = 'data'", (card_id,))
+                self._execute_sql(cursor, "SELECT data_content, name, user_id, delivery_template, delivery_template_enabled FROM cards WHERE id = ? AND type = 'data'", (card_id,))
                 result = cursor.fetchone()
 
                 if not result or not result[0]:
@@ -5487,6 +5616,11 @@ class DBManager:
                     return None
 
                 consumed_lines = lines[:requested_quantity]
+                # 在扣库存和写发货记录之前校验整单，缺参数时不消费任何一行。
+                if result[4]:
+                    from app.delivery_template import render_delivery_template
+                    for line in consumed_lines:
+                        render_delivery_template(result[3] or '', line)
                 remaining_lines = lines[requested_quantity:]
                 new_data_content = '\n'.join(remaining_lines)
 
@@ -6859,6 +6993,8 @@ class DBManager:
                     'DELETE FROM item_delivery_configs WHERE cookie_id = ? AND item_id = ?',
                     (cookie_id, item_id),
                 )
+                cursor.execute('DELETE FROM item_ai_prompts WHERE cookie_id = ? AND item_id = ?',
+                             (cookie_id, item_id))
                 cursor.execute('DELETE FROM item_info WHERE cookie_id = ? AND item_id = ?',
                              (cookie_id, item_id))
 
@@ -6919,6 +7055,8 @@ class DBManager:
                             'DELETE FROM item_delivery_configs WHERE cookie_id = ? AND item_id = ?',
                             (cookie_id, item_id),
                         )
+                        cursor.execute('DELETE FROM item_ai_prompts WHERE cookie_id = ? AND item_id = ?',
+                                     (cookie_id, item_id))
                         cursor.execute('DELETE FROM item_info WHERE cookie_id = ? AND item_id = ?',
                                      (cookie_id, item_id))
 

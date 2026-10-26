@@ -59,6 +59,7 @@ class AIReplyEngineTests(unittest.TestCase):
                 return_value='  "有货，可以直接拍。"  ',
             ) as call_openai,
             patch("app.ai_reply_engine.db_manager.get_ai_reply_settings", return_value=settings),
+            patch("app.ai_reply_engine.db_manager.get_item_ai_prompt", return_value='本商品交付密钥和链接。') as item_prompt,
         ):
             reply = self.engine.generate_reply(
                 message="有货吗",
@@ -73,6 +74,9 @@ class AIReplyEngineTests(unittest.TestCase):
         self.assertEqual(reply, "有货，可以直接拍。")
         self.assertEqual(save_conversation.call_count, 2)
         messages = call_openai.call_args.args[2]
+        item_prompt.assert_called_once_with('account-1', 'item-1')
+        self.assertIn('本商品交付密钥和链接。', messages[0]['content'])
+        self.assertIn('回复保持简短。', messages[0]['content'])
         self.assertEqual(
             [entry["content"] for entry in messages if entry["role"] == "user"],
             ["有货吗"],

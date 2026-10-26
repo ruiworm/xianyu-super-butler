@@ -42,6 +42,8 @@ import {
 } from '../services/api';
 import { confirmAction } from '../services/feedback';
 import DeliveryProtection from './DeliveryProtection';
+import ItemAIPromptEditor from './ItemAIPromptEditor';
+import CardDeliveryTemplateSettings from './CardDeliveryTemplateSettings';
 import GeneralDeliveryRules from './GeneralDeliveryRules';
 import {EmptyState, NoticeBanner, PageHeader, PageLoading, PageTabs} from './ui';
 
@@ -197,6 +199,7 @@ const ItemList: React.FC = () => {
   const [notice, setNotice] = useState<Notice>(null);
 
   const [detailItem, setDetailItem] = useState<Item | null>(null);
+  const [aiItem, setAIItem] = useState<Item | null>(null);
   const [itemDetail, setItemDetail] = useState('');
   const [deliveryItem, setDeliveryItem] = useState<Item | null>(null);
   const [deliveryLoading, setDeliveryLoading] = useState(false);
@@ -960,6 +963,11 @@ const ItemList: React.FC = () => {
                           >
                             <Edit className="h-4 w-4" />
                           </button>
+                          <button type="button" onClick={() => setAIItem(item)}
+                            className="rounded-md p-2 text-gray-600 hover:bg-gray-100"
+                            title="商品 AI 提示词" aria-label="商品 AI 提示词">
+                            <Sparkles className="h-4 w-4" />
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleDelete(item)}
@@ -1251,6 +1259,7 @@ const ItemList: React.FC = () => {
                                   : `⚠️ 未开启「多数量」：无论买家拍几件都只发 ${variant.deliveryCount || 1} 份。需按件数递增请到商品列表开启「多数量」。`}
                               </p>
                             </div>
+                            {selectedCard && <CardDeliveryTemplateSettings card={selectedCard} onSaved={() => { void getCards().then(setCards); }} />}
                           </div>
                         </article>
                       );
@@ -1289,6 +1298,7 @@ const ItemList: React.FC = () => {
         document.body,
       )}
 
+      {aiItem && <ItemAIPromptEditor item={aiItem} onClose={() => setAIItem(null)} />}
       {detailItem && createPortal(
         <div className="modal-overlay">
           <div className="modal-container">

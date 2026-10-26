@@ -38,6 +38,9 @@ from app.services.notification_test import (
 from app.routers.delivery_block import create_delivery_block_router
 from app.routers.logistics_quote import create_logistics_quote_router
 from app.routers.logistics_agent import create_logistics_agent_router
+from app.desktop_bridge import create_desktop_bridge_router
+from app.desktop_bridge_package import create_desktop_bridge_download_router
+from app.ai_reply_images import create_ai_reply_images_router
 from utils.qr_login import qr_login_manager
 from utils.xianyu_utils import trans_cookies
 from utils.image_utils import image_manager
@@ -378,6 +381,8 @@ logger.info("已注册物流报价解析路由")
 
 app.include_router(create_logistics_agent_router(get_current_user, db_manager))
 logger.info("已注册物流 Agent 路由")
+app.include_router(create_desktop_bridge_download_router())
+app.include_router(create_ai_reply_images_router(get_current_user, db_manager))
 
 # 初始化文件日志收集器
 setup_file_logging()
@@ -2058,9 +2063,11 @@ def update_cookie(cid: str, item: CookieIn, current_user: Dict[str, Any] = Depen
         if not success:
             raise HTTPException(status_code=400, detail="更新Cookie失败")
         
-        # 只有当 cookie 值真的发生变化时才重启任务
-        if item.value != old_cookie_value:
-            logger.info(f"Cookie值已变化，重启任务: {cid}")
+        # A previous write may have succeeded before its runtime restart failed.
+        # Compare both stores so retrying that same Cookie can repair the task.
+        runtime_cookie_value = cookie_manager.manager.cookies.get(cid)
+        if item.value != old_cookie_value or item.value != runtime_cookie_value:
+            logger.info(f"Cookie值或运行会话已变化，重启任务: {cid}")
             cookie_manager.manager.update_cookie(cid, item.value, save_to_db=False)
         else:
             logger.info(f"Cookie值未变化，无需重启任务: {cid}")
@@ -2070,6 +2077,47 @@ def update_cookie(cid: str, item: CookieIn, current_user: Dict[str, Any] = Depen
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+class SessionImportRequest(BaseModel):
+    value: str = Field(min_length=1, max_length=32000)
+
+
+@app.post('/cookies/{cid}/session-import')
+def import_account_session(cid: str, data: SessionImportRequest,
+                           current_user: Dict[str, Any] = Depends(get_current_user)):
+    """同步用户在自己电脑上手动登录/验证后的会话，禁止串号。"""
+    from app.db_manager import db_manager
+    from utils.xianyu_utils import trans_cookies, drop_stale_captcha_challenge
+    owned = db_manager.get_all_cookies(current_user['user_id'])
+    if cid not in owned:
+        raise HTTPException(status_code=403, detail='无权限操作该账号')
+    value = data.value.strip()
+    if value.lower().startswith('cookie:'):
+        value = value[7:].strip()
+    if '\r' in value or '\n' in value:
+        raise HTTPException(status_code=400, detail='请只粘贴单行 Cookie 内容，不要包含其他请求头')
+    value = '; '.join(part.strip() for part in value.split(';') if part.strip())
+    old = trans_cookies('; '.join(part.strip() for part in owned[cid].split(';') if part.strip()))
+    incoming = trans_cookies(value)
+    if not old.get('unb'):
+        raise HTTPException(status_code=400, detail='原账号缺少身份标识，无法安全核对，请先检查账号 Cookie')
+    if not incoming.get('unb') or not incoming.get('_m_h5_tk'):
+        raise HTTPException(status_code=400, detail='会话缺少 unb 或 _m_h5_tk，请提供完整的已登录 Cookie')
+    if incoming['unb'] != old['unb']:
+        raise HTTPException(status_code=400, detail='登录会话与所选闲鱼账号不一致，未更新')
+    cleaned = drop_stale_captcha_challenge(value)
+    update_cookie(cid, CookieIn(id=cid, value=cleaned), current_user)
+    from utils import risk_control
+    risk_control.registry.get(cid).reset()
+    return {'success': True, 'message': '会话已同步，请查看账号重新连接结果；导入不代表平台验证已通过'}
+
+
+app.include_router(create_desktop_bridge_router(
+    get_current_user,
+    db_manager,
+    lambda cid, value, user: import_account_session(cid, SessionImportRequest(value=value), user),
+))
 
 
 class CookieAccountInfo(BaseModel):
@@ -4960,6 +5008,28 @@ def debug_keywords_table_info(current_user: Dict[str, Any] = Depends(get_current
         raise HTTPException(status_code=500, detail=f"检查表结构失败: {str(e)}")
 
 
+def _validate_card_delivery_template(data: dict, existing: dict = None):
+    card = {**(existing or {}), **data}
+    if not card.get('delivery_template_enabled'):
+        return
+    if card.get('type') == 'image':
+        raise HTTPException(status_code=400, detail='图片库存不支持文本参数模板')
+    template = card.get('delivery_template')
+    if not isinstance(template, str) or not template.strip() or len(template) > 20000:
+        raise HTTPException(status_code=400, detail='请填写发货模板，最多 20000 字')
+    from app.delivery_template import render_delivery_template
+    contents = []
+    if card.get('type') == 'data':
+        contents = [line.strip() for line in (card.get('data_content') or '').splitlines() if line.strip()]
+    elif card.get('type') == 'text':
+        contents = [card.get('text_content') or '']
+    try:
+        for content in contents:
+            render_delivery_template(template, content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
 # 卡券管理API
 @app.get("/cards")
 def get_cards(current_user: Dict[str, Any] = Depends(get_current_user)):
@@ -4980,6 +5050,7 @@ def create_card(card_data: dict, current_user: Dict[str, Any] = Depends(get_curr
         from app.db_manager import db_manager
         user_id = current_user['user_id']
         card_name = card_data.get('name', '未命名卡券')
+        _validate_card_delivery_template(card_data)
 
         log_with_user('info', f"创建卡券: {card_name}", current_user)
 
@@ -5063,6 +5134,10 @@ def update_card(card_id: int, card_data: dict, current_user: Dict[str, Any] = De
     """更新卡券"""
     try:
         from app.db_manager import db_manager
+        existing = db_manager.get_card_by_id(card_id, current_user['user_id'])
+        if not existing:
+            raise HTTPException(status_code=404, detail='卡券不存在')
+        _validate_card_delivery_template(card_data, existing)
         # 验证多规格字段
         is_multi_spec = card_data.get('is_multi_spec')
         if is_multi_spec:
@@ -6331,6 +6406,32 @@ def batch_delete_items(
 
 # ==================== AI回复管理API ====================
 
+class ItemAIPromptRequest(BaseModel):
+    prompt: str = Field(default="", max_length=10000)
+
+
+def _check_item_ai_access(cookie_id: str, item_id: str, current_user: dict):
+    if cookie_id not in db_manager.get_all_cookies(current_user['user_id']):
+        raise HTTPException(status_code=403, detail='无权限操作该账号')
+    if not db_manager.get_item_info(cookie_id, item_id):
+        raise HTTPException(status_code=404, detail='商品不存在')
+
+
+@app.get('/item-ai-prompts/{cookie_id}/{item_id}')
+def get_item_ai_prompt(cookie_id: str, item_id: str,
+                       current_user: Dict[str, Any] = Depends(get_current_user)):
+    _check_item_ai_access(cookie_id, item_id, current_user)
+    return {'prompt': db_manager.get_item_ai_prompt(cookie_id, item_id)}
+
+
+@app.put('/item-ai-prompts/{cookie_id}/{item_id}')
+def save_item_ai_prompt(cookie_id: str, item_id: str, data: ItemAIPromptRequest,
+                        current_user: Dict[str, Any] = Depends(get_current_user)):
+    _check_item_ai_access(cookie_id, item_id, current_user)
+    db_manager.save_item_ai_prompt(cookie_id, item_id, data.prompt.strip())
+    return {'message': '商品 AI 提示词已保存'}
+
+
 @app.get("/ai-reply-settings/{cookie_id}")
 def get_ai_reply_settings(cookie_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
     """获取指定账号的AI回复设置"""
@@ -6459,7 +6560,7 @@ async def test_ai_reply(cookie_id: str, test_data: dict,
             chat_id=f"test_{int(time.time())}",
             cookie_id=cookie_id,
             user_id="test_user",
-            item_id="test_item",
+            item_id=str(test_data.get("item_id") or ""),
             skip_wait=True  # 测试时跳过10秒等待
         )
 

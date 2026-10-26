@@ -1,4 +1,15 @@
 import { get, post, put, del, patch } from '../lib/request';
+
+export interface AIReplyImageRule {
+  id: string; title: string; intent: string; image_url: string; item_id: string; enabled: boolean;
+}
+export const getAIReplyImages = (id: string) => get<{ rules: AIReplyImageRule[] }>(`/ai-reply-images/${encodeURIComponent(id)}`);
+export const saveAIReplyImages = (id: string, rules: AIReplyImageRule[]) => put<{ rules: AIReplyImageRule[] }>(`/ai-reply-images/${encodeURIComponent(id)}`, { rules });
+
+export const getItemAIPrompt = (cookieId: string, itemId: string) =>
+  get<{ prompt: string }>(`/item-ai-prompts/${encodeURIComponent(cookieId)}/${encodeURIComponent(itemId)}`);
+export const saveItemAIPrompt = (cookieId: string, itemId: string, prompt: string) =>
+  put(`/item-ai-prompts/${encodeURIComponent(cookieId)}/${encodeURIComponent(itemId)}`, { prompt });
 import {
   LoginResponse, AccountDetail, Order, PaginatedResponse,
   AdminStats, AdminUser, Card, CardShipment, SystemSettings, ApiResponse, OrderAnalytics,
@@ -143,6 +154,32 @@ export const updateAccountPauseDuration = async (id: string, pauseDuration: numb
 export const updateAccountCookie = async (id: string, value: string): Promise<any> => {
   return put(`/cookies/${id}`, { id, value });
 };
+
+export const importAccountSession = (id: string, value: string) =>
+  post<{ success: boolean; message: string }>(`/cookies/${encodeURIComponent(id)}/session-import`, { value });
+
+export interface DesktopBridgeStatus {
+  enabled: boolean;
+  created_at: string | number | null;
+  expires_at: string | number | null;
+  last_seen_at: string | number | null;
+  last_sync_at: string | number | null;
+  query_enabled?: boolean;
+  query_ready?: boolean;
+  last_query_seen_at?: string | number | null;
+}
+
+export const getDesktopBridgeStatus = (id: string) =>
+  get<DesktopBridgeStatus>(`/cookies/${encodeURIComponent(id)}/desktop-bridge`);
+
+export const createDesktopBridgeToken = (id: string) =>
+  post<{ token: string; expires_at: string | number }>(`/cookies/${encodeURIComponent(id)}/desktop-bridge`);
+
+export const revokeDesktopBridgeToken = (id: string) =>
+  del<{ success: boolean }>(`/cookies/${encodeURIComponent(id)}/desktop-bridge`);
+
+export const setDesktopQueries = (id: string, enabled: boolean) =>
+  put<DesktopBridgeStatus>(`/cookies/${encodeURIComponent(id)}/desktop-bridge/queries`, { enabled });
 
 export const updateAccountLoginInfo = async (id: string, data: {
   username?: string;
@@ -960,6 +997,7 @@ export const testAIConnection = async (
   cookieId: string,
   payload: {
     message?: string;
+    item_id?: string;
     item_title?: string;
     item_price?: number;
     item_desc?: string;

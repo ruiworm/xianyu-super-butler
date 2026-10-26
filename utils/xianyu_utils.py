@@ -2,7 +2,7 @@ import base64
 import subprocess
 from functools import partial
 import time
-import hashlib
+from utils.request_signing import generate_sign
 import struct
 import os
 from typing import Any, Dict, List
@@ -59,10 +59,15 @@ def trans_cookies(cookies_str: str) -> dict:
         raise ValueError("cookies不能为空")
 
     cookies = {}
-    for cookie in cookies_str.split("; "):
+    # Cookie separators don't require a space. Desktop exports commonly use
+    # "unb=...;_m_h5_tk=...", which must still yield a usable signing token.
+    for cookie in cookies_str.split(";"):
+        cookie = cookie.strip()
         if "=" in cookie:
             key, value = cookie.split("=", 1)
-            cookies[key] = value
+            key = key.strip()
+            if key:
+                cookies[key] = value.strip()
     return cookies
 
 
@@ -135,17 +140,6 @@ def generate_device_id(user_id: str) -> str:
                 result.append(chars[rand_val])
     
     return ''.join(result) + "-" + user_id
-
-
-def generate_sign(t: str, token: str, data: str) -> str:
-    """生成签名"""
-    app_key = "34839810"
-    msg = f"{token}&{t}&{app_key}&{data}"
-    
-    # 使用MD5生成签名
-    md5_hash = hashlib.md5()
-    md5_hash.update(msg.encode('utf-8'))
-    return md5_hash.hexdigest()
 
 
 class MessagePackDecoder:

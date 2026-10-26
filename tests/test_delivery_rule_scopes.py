@@ -10,6 +10,8 @@ class DeliveryRuleScopeTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.manager = DBManager(os.path.join(self.temp_dir.name, "rules.db"))
         cursor = self.manager.conn.cursor()
+        cursor.executemany("INSERT INTO cookies (id, value, user_id) VALUES (?, 'test', 1)",
+                           [('seller-a',), ('seller-b',)])
         cursor.execute(
             """
             INSERT INTO cards (name, type, text_content, enabled, user_id)
@@ -73,6 +75,24 @@ class DeliveryRuleScopeTests(unittest.TestCase):
         )
 
         self.assertEqual(rules, [])
+
+    def test_longest_matching_keyword_wins(self):
+        self.manager.create_delivery_rule('年度会员', self.product_card, user_id=1)
+        rules = self.manager.get_delivery_rules_for_item('年度会员商品', 'seller-b', 'item-2')
+        self.assertEqual([r['card_id'] for r in rules], [self.product_card])
+
+    def test_empty_search_and_sql_wildcards_do_not_match_everything(self):
+        for text in ('', '%', '_'):
+            self.assertEqual(self.manager.get_delivery_rules_for_item(text, 'seller-b', 'item-2'), [])
+
+    def test_equal_specificity_remains_ambiguous(self):
+        self.manager.create_delivery_rule('会员', self.product_card, user_id=1)
+        self.assertEqual(len(self.manager.get_delivery_rules_for_item('会员', 'seller-b', 'item-2')), 2)
+
+    def test_foreign_user_global_rule_is_not_selected(self):
+        self.manager.create_delivery_rule('年度会员', self.product_card, user_id=2)
+        rules = self.manager.get_delivery_rules_for_item('年度会员', 'seller-b', 'item-2')
+        self.assertEqual([r['card_id'] for r in rules], [self.global_card])
 
 
 if __name__ == "__main__":

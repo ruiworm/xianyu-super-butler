@@ -12,9 +12,12 @@ services:
     volumes:
       - ./data:/app/data:rw
       - ./logs:/app/logs:rw
+      - ./static/uploads:/app/static/uploads:rw
       - ./backups:/app/backups:rw
       - ./global_config.yml:/app/global_config.yml:ro
     environment:
+      XIANYU_SIGN_ALGORITHM: "${XIANYU_SIGN_ALGORITHM:-md5}"
+      BROWSER_COOKIE_REFRESH_ENABLED: "${BROWSER_COOKIE_REFRESH_ENABLED:-false}"
       PYTHONUNBUFFERED: "${PYTHONUNBUFFERED:-1}"
       PYTHONDONTWRITEBYTECODE: "${PYTHONDONTWRITEBYTECODE:-1}"
       TZ: "${TZ:-Asia/Shanghai}"

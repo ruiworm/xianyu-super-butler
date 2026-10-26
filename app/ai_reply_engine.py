@@ -675,11 +675,29 @@ class AIReplyEngine:
                         self.save_conversation(chat_id, cookie_id, user_id, item_id, "assistant", refuse_reply, intent)
                         return refuse_reply
 
+                # Resolve image IDs server-side; the model never supplies paths.
+                try:
+                    from app.ai_reply_images import select_reply_image
+                    image_rule = select_reply_image(
+                        db_manager, self._generate_with_retry, settings, cookie_id,
+                        item_id, message, context, item_info,
+                    )
+                except Exception as image_error:
+                    logger.warning(f"图片意图识别失败，继续文字回复: {type(image_error).__name__}")
+                    image_rule = None
+                if image_rule:
+                    self.save_conversation(chat_id, cookie_id, user_id, item_id, 'assistant',
+                                           f"[图片：{image_rule['title']}]", intent)
+                    return '__IMAGE_SEND__' + image_rule['image_url']
+
                 # 6. 构建提示词
                 system_prompt = self._resolve_system_prompt(
                     settings.get('custom_prompts', ''),
                     intent,
                 )
+                item_prompt = db_manager.get_item_ai_prompt(cookie_id, item_id)
+                if item_prompt.strip():
+                    system_prompt += '\n\n当前商品专属规则（商品事实以此为准）：\n' + item_prompt
 
                 # 7. 构建商品信息
                 item_desc = f"商品标题: {item_info.get('title', '未知')}\n"
@@ -722,6 +740,9 @@ class AIReplyEngine:
                 reply = self._generate_with_retry(settings, messages, cookie_id)
 
                 reply = self._normalize_reply(reply)
+                # Image actions may only originate from a validated configured rule.
+                if reply and reply.startswith('__IMAGE_SEND__'):
+                    reply = None
                 if not reply:
                     logger.warning(f"AI服务返回空回复，账号={cookie_id}, intent={intent}")
                     return None

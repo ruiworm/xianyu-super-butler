@@ -23,6 +23,7 @@ from loguru import logger
 from utils import risk_control
 from utils.xianyu_utils import generate_sign, trans_cookies
 from utils.user_agents import CHROME_UA
+from app.desktop_queries import desktop_query_if_enabled
 
 
 # 卖家端接口在部分字段上与买家端行为不同，调用方需注意：
@@ -142,6 +143,14 @@ class XianyuSellerAPI:
             raise risk_control.RiskControlBlocked(
                 self.cookie_id, guard.remaining_seconds, guard.last_hit_reason
             )
+
+        desktop_result = await desktop_query_if_enabled(self.cookie_id, api, payload, version)
+        if desktop_result is not None:
+            ret = desktop_result.get('ret', [])
+            if any(str(value).startswith('SUCCESS::') for value in ret):
+                guard.reset()
+                return desktop_result
+            raise SellerApiError(api, ret)
 
         for attempt in range(2):
             data_val = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
@@ -465,6 +474,15 @@ class XianyuSellerAPI:
 
         if not self.cookies_str:
             raise SellerApiError("mtop.idle.web.trade.order.detail", ["Cookie 为空"])
+
+        desktop_result = await desktop_query_if_enabled(
+            self.cookie_id, 'mtop.idle.web.trade.order.detail', {'tid': str(order_id)})
+        if desktop_result is not None:
+            ret = desktop_result.get('ret', [])
+            if any(str(value).startswith('SUCCESS::') for value in ret):
+                guard.reset()
+                return desktop_result.get('data') or {}
+            raise SellerApiError('mtop.idle.web.trade.order.detail', ret)
 
         last_ret: List[str] = []
         data_val = json.dumps({"tid": str(order_id)}, separators=(",", ":"))

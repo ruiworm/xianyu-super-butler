@@ -24,6 +24,7 @@ import sys
 import aiohttp
 from collections import defaultdict
 from app.db_manager import db_manager
+from app.desktop_queries import desktop_query_if_enabled
 from app.specification import combine_legacy_specification
 from utils.log_sanitizer import redact_log_record, redact_sensitive_text
 from utils.user_agents import CHROME_UA, SEC_CH_UA
@@ -798,10 +799,10 @@ class XianyuLive:
 
         # Cookie刷新定时任务
         self.cookie_refresh_task = None
-        self.cookie_refresh_interval = 1200  # 1小时 = 3600秒
-        self.last_cookie_refresh_time = 0
+        self.cookie_refresh_interval = 1200  # 可选的浏览器刷新间隔：20分钟
+        self.last_cookie_refresh_time = time.time()
         self.cookie_refresh_lock = asyncio.Lock()  # 使用Lock防止重复执行Cookie刷新
-        self.cookie_refresh_enabled = True  # 是否启用Cookie刷新功能
+        self.cookie_refresh_enabled = os.getenv('BROWSER_COOKIE_REFRESH_ENABLED', 'false').lower() == 'true'
 
         # 商品同步定时任务
         self.item_sync_task = None
@@ -2140,8 +2141,8 @@ class XianyuLive:
                 account_info = await asyncio.to_thread(
                     db_manager.get_cookie_details, self.cookie_id
                 )
-                if account_info and account_info.get('cookie_value'):
-                    new_cookies_str = account_info.get('cookie_value')
+                if account_info and account_info.get('value'):
+                    new_cookies_str = account_info['value']
                     if new_cookies_str != self.cookies_str:
                         logger.info(f"【{self.cookie_id}】检测到数据库中的cookie已更新，重新加载cookie")
                         self.cookies_str = new_cookies_str
@@ -4186,6 +4187,13 @@ class XianyuLive:
         if retry_count >= 4:  # 最多重试3次
             logger.error("获取商品信息失败，重试次数过多")
             return {"error": "获取商品信息失败，重试次数过多"}
+
+        desktop_result = await desktop_query_if_enabled(
+            self.cookie_id, 'mtop.taobao.idle.pc.detail', {'itemId': str(item_id)})
+        if desktop_result is not None:
+            if any(str(ret).startswith('SUCCESS::') for ret in desktop_result.get('ret', [])):
+                return desktop_result
+            return {'error': '客户端商品详情查询失败，请检查登录或验证状态'}
 
         # 确保session已创建
         if not self.session:
@@ -6307,7 +6315,13 @@ class XianyuLive:
 
                 if delivery_content:
                     # 处理备注信息和变量替换
-                    final_content = self._process_delivery_content_with_description(delivery_content, rule.get('card_description', ''))
+                    if rule.get('card_delivery_template_enabled') and rule['card_type'] != 'image':
+                        from app.delivery_template import render_delivery_template
+                        final_content = render_delivery_template(
+                            rule.get('card_delivery_template') or '', delivery_content
+                        )
+                    else:
+                        final_content = self._process_delivery_content_with_description(delivery_content, rule.get('card_description', ''))
 
                     # 增加对应规则或商品规格绑定的发货次数统计。
                     if rule.get("rule_kind") == "variant_binding":
@@ -7773,7 +7787,7 @@ class XianyuLive:
 
 
     async def cookie_refresh_loop(self):
-        """Cookie刷新定时任务 - 每小时执行一次"""
+        """可选的浏览器Cookie刷新；默认关闭，日常使用API令牌续期。"""
         try:
             while True:
                 try:
@@ -7834,14 +7848,12 @@ class XianyuLive:
         # 使用Lock确保原子性，防止重复执行
         async with self.cookie_refresh_lock:
             try:
-                logger.info(f"【{self.cookie_id}】开始Cookie刷新任务，暂时暂停心跳以避免连接冲突...")
-
-                # 暂时暂停心跳任务，避免与浏览器操作冲突
-                heartbeat_was_running = False
-                if self.heartbeat_task and not self.heartbeat_task.done():
-                    heartbeat_was_running = True
-                    self.heartbeat_task.cancel()
-                    logger.warning(f"【{self.cookie_id}】已暂停心跳任务")
+                from utils import risk_control
+                if (getattr(self, 'manual_captcha_in_progress', False)
+                        or risk_control.registry.get(self.cookie_id).is_blocked):
+                    logger.info(f"【{self.cookie_id}】人工验证或风控冷却期间跳过浏览器刷新")
+                    return
+                logger.info(f"【{self.cookie_id}】开始可选浏览器Cookie刷新，保持WebSocket心跳")
 
                 # 为整个Cookie刷新任务添加超时保护（3分钟，缩短时间减少影响）
                 success = await asyncio.wait_for(
@@ -7849,14 +7861,9 @@ class XianyuLive:
                     timeout=180.0  # 3分钟超时，减少对WebSocket的影响
                 )
 
-                # 重新启动心跳任务
-                if heartbeat_was_running and self.ws and not self.ws.closed:
-                    logger.warning(f"【{self.cookie_id}】重新启动心跳任务")
-                    self.heartbeat_task = asyncio.create_task(self.heartbeat_loop(self.ws))
-
                 if success:
                     self.last_cookie_refresh_time = current_time
-                    logger.info(f"【{self.cookie_id}】Cookie刷新任务完成，心跳已恢复")
+                    logger.info(f"【{self.cookie_id}】Cookie刷新任务完成")
                     
                     # 刷新成功后，验证Cookie有效性
                     logger.info(f"【{self.cookie_id}】开始验证刷新后的Cookie有效性...")
@@ -7898,17 +7905,6 @@ class XianyuLive:
                 logger.error(f"【{self.cookie_id}】执行Cookie刷新任务异常: {self._safe_str(e)}")
                 # 异常也要更新时间，避免频繁重试
                 self.last_cookie_refresh_time = current_time
-            finally:
-                # 确保心跳任务恢复（如果WebSocket仍然连接）
-                if (self.ws and not self.ws.closed and
-                    (not self.heartbeat_task or self.heartbeat_task.done())):
-                    logger.info(f"【{self.cookie_id}】Cookie刷新完成，心跳任务正常运行")
-                    self.heartbeat_task = asyncio.create_task(self.heartbeat_loop(self.ws))
-
-                # 清空消息接收标志，允许下次正常执行Cookie刷新
-                self.last_message_received_time = 0
-                logger.warning(f"【{self.cookie_id}】Cookie刷新完成，已清空消息接收标志")
-
 
 
     def enable_cookie_refresh(self, enabled: bool = True):
@@ -10963,6 +10959,10 @@ class XianyuLive:
             }
 
         async def request_item_api(data):
+            desktop_result = await desktop_query_if_enabled(
+                self.cookie_id, 'mtop.idle.web.xyh.item.list', data)
+            if desktop_result is not None:
+                return desktop_result
             params = {
                 'jsv': '2.7.2',
                 'appKey': '34839810',

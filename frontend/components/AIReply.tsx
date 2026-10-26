@@ -1,3 +1,4 @@
+import AIReplyImages from './AIReplyImages';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Bot,
@@ -51,6 +52,7 @@ const AIReply: React.FC = () => {
   const [showApiKey, setShowApiKey] = useState(false);
   const [testMessage, setTestMessage] = useState('你好，这个商品现在还能买吗？');
   const [testReply, setTestReply] = useState('');
+  const [testItemId, setTestItemId] = useState('');
 
   const selectedAccount = useMemo(
     () => accounts.find(account => account.id === selectedAccountId),
@@ -115,6 +117,7 @@ const AIReply: React.FC = () => {
     try {
       const result = await testAIConnection(selectedAccountId, {
         message: testMessage.trim(),
+        item_id: testItemId.trim(),
         item_title: '测试商品',
         item_price: 100,
         item_desc: '仅用于测试人工智能回复，不会发送到闲鱼。',
@@ -175,6 +178,7 @@ const AIReply: React.FC = () => {
         />
       ) : (
         <>
+          <div key={selectedAccountId}><AIReplyImages accountId={selectedAccountId} /></div>
           <section className="section-panel grid gap-4 p-4 lg:grid-cols-[1fr_auto] lg:items-center">
             <div>
               <div className="flex items-center gap-2 font-bold text-gray-900">
@@ -400,10 +404,12 @@ const AIReply: React.FC = () => {
                 />
                 <div className="p-5">
                   <textarea
+                    aria-label="测试买家消息"
                     value={testMessage}
                     onChange={event => setTestMessage(event.target.value)}
                     className="ios-input min-h-24 w-full resize-y rounded-md px-3 py-2.5 text-sm"
                   />
+                  <label className="mt-3 block text-sm">测试商品 ID（可选）<input value={testItemId} onChange={e => setTestItemId(e.target.value)} className="ios-input mt-1 w-full rounded-md p-2" placeholder="测试商品专属图片时填写" /></label>
                   <button
                     type="button"
                     onClick={handleTest}
@@ -415,7 +421,7 @@ const AIReply: React.FC = () => {
                   </button>
                   {testReply && (
                     <div className="mt-4 border-l-4 border-yellow-400 bg-yellow-50 px-4 py-3 text-sm leading-6 text-gray-800">
-                      {testReply}
+                      {testReply.startsWith('__IMAGE_SEND__/static/uploads/images/') ? <><p>匹配到固定图片（仅预览，不会发送）：</p><img src={testReply.slice('__IMAGE_SEND__'.length)} alt="AI 匹配的固定图片" className="mt-2 max-h-64 max-w-full object-contain" /></> : testReply}
                     </div>
                   )}
                 </div>

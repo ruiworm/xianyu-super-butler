@@ -408,6 +408,23 @@ class ProductVariantDeliveryTests(unittest.TestCase):
         cursor.execute("SELECT data_content FROM cards WHERE id = ?", (card_id,))
         self.assertEqual("CODE-1\nCODE-2\nCODE-3", cursor.fetchone()[0])
 
+    def test_delivery_flow_renders_key_and_link_from_same_record(self):
+        from XianyuAutoAsync import XianyuLive
+
+        self.manager.conn.execute("UPDATE item_info SET item_detail = 'detail'")
+        self.manager.conn.commit()
+        card = self.manager.create_card('key-link', 'data', data_content='KEY-1----https://example.test\nKEY-2----https://example.test/2',
+            user_id=1, delivery_template_enabled=True, delivery_template='密钥：{参数1}\n链接：{参数2}')
+        self.manager.save_item_delivery_config(user_id=1, cookie_id='seller-1', item_id='item-1',
+            enabled=True, is_multi_spec=False, variants=[{'card_id': card, 'delivery_count': 1}])
+        live = object.__new__(XianyuLive)
+        live.cookie_id = 'seller-1'
+        live.save_item_info_to_db = AsyncMock()
+        with patch('app.db_manager.db_manager', self.manager):
+            content = asyncio.run(live._auto_delivery('item-1', 'Subscription', 'order-1', 'buyer-1', delivery_context={}))
+        self.assertEqual(content, '密钥：KEY-1\n链接：https://example.test')
+        self.assertEqual(self.manager.get_card_by_id(card)['data_content'], 'KEY-2----https://example.test/2')
+
     def test_delivery_flow_preloads_full_batch_inventory_once(self):
         from XianyuAutoAsync import XianyuLive
 

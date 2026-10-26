@@ -19,6 +19,7 @@ import {
   deleteShippingRule,
   updateShippingRule,
 } from '../services/api';
+import CardDeliveryTemplateSettings from './CardDeliveryTemplateSettings';
 import { confirmAction, notify } from '../services/feedback';
 import { EmptyState, SectionHeader } from './ui';
 
@@ -354,6 +355,8 @@ const GeneralDeliveryRules: React.FC<GeneralDeliveryRulesProps> = ({
                   className="ios-input w-full rounded-md px-3 py-2.5"
                 />
               </div>
+              {cards.find(card => String(card.id) === form.cardId) && <CardDeliveryTemplateSettings
+                card={cards.find(card => String(card.id) === form.cardId)!} onSaved={() => { void onReload(); }} />}
               <div className="sm:col-span-2">
                 <label className="mb-2 block text-sm font-bold text-gray-700" htmlFor="generic-rule-description">
                   规则备注

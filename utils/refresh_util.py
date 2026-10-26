@@ -1,6 +1,6 @@
 import time
 import os
-import hashlib
+from utils.request_signing import generate_sign
 import math
 from typing import Dict
 import requests
@@ -2046,18 +2046,6 @@ def generate_device_id(user_id: str) -> str:
                 result.append(chars[rand_val])
     
     return ''.join(result) + "-" + user_id
-
-
-def generate_sign(t: str, token: str, data: str) -> str:
-    """生成签名"""
-    app_key = "34839810"
-    msg = f"{token}&{t}&{app_key}&{data}"
-    
-    # 使用MD5生成签名
-    md5_hash = hashlib.md5()
-    md5_hash.update(msg.encode('utf-8'))
-    return md5_hash.hexdigest()
-
 
 
 async def refresh_token(cookies_str: str):

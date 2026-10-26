@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AccountDetail, AIReplySettings } from '../types';
+import AccountSessionImport from './AccountSessionImport';
 import {
   getAccountDetails,
   updateAccountStatus,
@@ -54,6 +55,7 @@ const AccountList: React.FC = () => {
   const [manualCaptchaId, setManualCaptchaId] = useState<string | null>(null);
   // 人工滑块验证弹窗：把服务器端浏览器的画面镜像到本页
   const [captchaAccount, setCaptchaAccount] = useState<AccountDetail | null>(null);
+  const [sessionImportAccount, setSessionImportAccount] = useState<AccountDetail | null>(null);
   const [captchaShot, setCaptchaShot] = useState('');
   const [captchaStage, setCaptchaStage] = useState<'starting' | 'ready' | 'done' | 'failed'>('starting');
   const [captchaMessage, setCaptchaMessage] = useState('');
@@ -718,6 +720,11 @@ const AccountList: React.FC = () => {
                       : <ShieldCheck className="h-4 w-4" />}
                     <span>人工验证</span>
                 </button>
+                <button onClick={() => setSessionImportAccount(account)}
+                  className="rounded-md px-2.5 py-2 text-xs font-bold text-gray-600 disabled:opacity-40"
+                  title="连接电脑上的闲鱼卖家客服，登录并手动完成验证后自动同步会话">
+                  桌面客户端接入
+                </button>
                 <button
                     onClick={() => handleRefreshProfile(account.id)}
                     disabled={refreshingProfileId === account.id}
@@ -1185,6 +1192,11 @@ const AccountList: React.FC = () => {
         document.body
       )}
 
+      {sessionImportAccount && <React.Fragment key={sessionImportAccount.id}><AccountSessionImport account={sessionImportAccount}
+        onClose={() => setSessionImportAccount(null)} onSaved={() => {
+          void loadAccounts({ silent: true });
+          void getRiskControlStatus().then(status => setRiskBlocked((status.accounts || []).filter(item => item.blocked || (item.verification_type && item.verification_type !== 'none'))));
+        }} /></React.Fragment>}
       {captchaAccount && createPortal(
         <div className="modal-overlay">
           <div className="modal-container modal-container-lg">

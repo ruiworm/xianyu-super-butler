@@ -8,6 +8,35 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
+
+
+def render_delivery_template(template: str, content: str) -> str:
+    """一条库存记录是一个整体：支持 ---- 分列或 JSON 命名参数。"""
+    values = {'参数': content, 'DELIVERY_CONTENT': content}
+    values.update({f'参数{i}': value.strip()
+                   for i, value in enumerate(content.split('----'), 1)})
+    if content.lstrip().startswith('{'):
+        try:
+            record = json.loads(content)
+        except json.JSONDecodeError:
+            raise ValueError('库存行的 JSON 格式无效') from None
+        if not isinstance(record, dict):
+            raise ValueError('命名参数必须是 JSON 对象')
+        for key, value in record.items():
+            if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+                values[str(key)] = str(value)
+
+    def replace(match):
+        name = match.group(1)
+        if name not in values or not values[name].strip():
+            raise ValueError(f'发货内容缺少参数：{name}')
+        return values[name]
+
+    if not template.strip():
+        raise ValueError('请填写发货模板')
+    return re.sub(r'\{([^{}\n]+)\}', replace, template)
 
 # 单段消息的最大字符数。闲鱼 IM 对长文本的容忍度有限，
 # 超长内容一次性发送容易被截断或吞掉，500 字符是保守值。

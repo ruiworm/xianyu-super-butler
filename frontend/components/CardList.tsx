@@ -4,6 +4,7 @@ import { Card } from '../types';
 import { getCards, createCard, updateCard, deleteCard } from '../services/api';
 import { confirmAction, notify } from '../services/feedback';
 import { Plus, CreditCard, FileText, Image as ImageIcon, Code, Edit, Trash2, Save, X, Package, Boxes } from 'lucide-react';
+import DeliveryTemplateEditor from './DeliveryTemplateEditor';
 import { EmptyState, PageHeader, SectionHeader } from './ui';
 
 const CardList: React.FC = () => {
@@ -16,6 +17,8 @@ const CardList: React.FC = () => {
     name: '',
     type: 'text' as Card['type'],
     content: '',
+    delivery_template: '',
+    delivery_template_enabled: false,
     description: '',
     enabled: true,
     delay_seconds: 0
@@ -52,6 +55,8 @@ const CardList: React.FC = () => {
       data_content: card.data_content || '',
       // 图片配置
       image_url: card.image_url || '',
+      delivery_template: card.delivery_template || '',
+      delivery_template_enabled: Boolean(card.delivery_template_enabled),
       // 通用配置
       delay_seconds: card.delay_seconds || 0,
       description: card.description || '',
@@ -79,6 +84,8 @@ const CardList: React.FC = () => {
         type: editForm.type as any,
         description: editForm.description?.trim(),
         delay_seconds: editForm.delay_seconds || 0,
+        delivery_template: editForm.delivery_template || '',
+        delivery_template_enabled: editForm.type !== 'image' && Boolean(editForm.delivery_template_enabled),
         enabled: editForm.enabled ?? true
       };
 
@@ -104,7 +111,7 @@ const CardList: React.FC = () => {
       getCards().then(setCards);
     } catch (error) {
       console.error('更新卡密失败:', error);
-      notify('更新失败，请重试');
+      notify((error as any)?.response?.data?.detail || '更新失败，请重试');
     }
   };
 
@@ -137,6 +144,8 @@ const CardList: React.FC = () => {
         name,
         type: addForm.type,
         description: addForm.description.trim(),
+        delivery_template: addForm.delivery_template,
+        delivery_template_enabled: addForm.type !== 'image' && addForm.delivery_template_enabled,
         enabled: addForm.enabled,
         delay_seconds: addForm.delay_seconds
       };
@@ -161,6 +170,8 @@ const CardList: React.FC = () => {
         name: '',
         type: 'text',
         content: '',
+        delivery_template: '',
+        delivery_template_enabled: false,
         description: '',
         enabled: true,
         delay_seconds: 0
@@ -168,7 +179,7 @@ const CardList: React.FC = () => {
       getCards().then(setCards);
     } catch (error) {
       console.error('添加卡密失败:', error);
-      notify('添加失败，请重试');
+      notify((error as any)?.response?.data?.detail || '添加失败，请重试');
     }
   };
 
@@ -454,6 +465,10 @@ const CardList: React.FC = () => {
                   </div>
                 )}
 
+                {editForm.type !== 'image' && <DeliveryTemplateEditor
+                  enabled={Boolean(editForm.delivery_template_enabled)} template={editForm.delivery_template || ''}
+                  onChange={(enabled, template) => setEditForm({ ...editForm, delivery_template_enabled: enabled, delivery_template: template })} />}
+
                 {/* 固定文字配置 */}
                 {editForm.type === 'text' && (
                   <div className="rounded-md border border-gray-200 bg-gray-50 p-4">
@@ -702,6 +717,9 @@ const CardList: React.FC = () => {
                   )}
                 </div>
 
+                {addForm.type !== 'image' && <DeliveryTemplateEditor
+                  enabled={addForm.delivery_template_enabled} template={addForm.delivery_template}
+                  onChange={(enabled, template) => setAddForm({ ...addForm, delivery_template_enabled: enabled, delivery_template: template })} />}
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">描述</label>
                   <textarea

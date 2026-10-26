@@ -25,8 +25,11 @@ services:
     volumes:
       - ./data:/app/data:rw
       - ./logs:/app/logs:rw
+      - ./static/uploads:/app/static/uploads:rw
       - ./backups:/app/backups:rw
     environment:
+      XIANYU_SIGN_ALGORITHM: "${XIANYU_SIGN_ALGORITHM:-md5}"
+      BROWSER_COOKIE_REFRESH_ENABLED: "${BROWSER_COOKIE_REFRESH_ENABLED:-false}"
       TZ: Asia/Shanghai
       DB_PATH: /app/data/xianyu_data.db
       LOG_LEVEL: INFO
