@@ -782,7 +782,7 @@ const ItemList: React.FC = () => {
                   窗口放不下就由外层容器左右滚动。表头与行共用同一套列宽定义。 */}
               <div className="overflow-x-auto">
                 <div className="min-w-full xl:min-w-[1200px]">
-                  <div className="hidden grid-cols-[340px_140px_260px_210px_110px] border-b-2 border-gray-300 bg-gray-100 text-xs font-bold text-gray-600 xl:grid [&>span]:border-r [&>span]:border-gray-300 [&>span]:px-4 [&>span]:py-3 [&>span:nth-child(2)]:px-2 [&>span:last-child]:border-r-0">
+                  <div className="hidden grid-cols-[340px_140px_260px_210px_200px] border-b-2 border-gray-300 bg-gray-100 text-xs font-bold text-gray-600 xl:grid [&>span]:border-r [&>span]:border-gray-300 [&>span]:px-4 [&>span]:py-3 [&>span:nth-child(2)]:px-2 [&>span:last-child]:border-r-0">
                     <span>商品信息</span>
                     <span>所属账号</span>
                     <span>专属自动发货</span>
@@ -824,7 +824,7 @@ const ItemList: React.FC = () => {
                   return (
                     <article
                       key={key}
-                      className="grid gap-4 px-4 py-4 transition-colors hover:bg-[#fffdf0] xl:grid-cols-[340px_140px_260px_210px_110px] xl:items-stretch xl:gap-0 xl:px-0 xl:[&>*]:flex xl:[&>*]:min-w-0 xl:[&>*]:flex-col xl:[&>*]:justify-center xl:[&>*]:border-r xl:[&>*]:border-gray-200 xl:[&>*]:px-4 xl:[&>*:first-child]:!flex-row xl:[&>*:first-child]:items-center xl:[&>*:last-child]:border-r-0"
+                      className="grid gap-4 px-4 py-4 transition-colors hover:bg-[#fffdf0] xl:grid-cols-[340px_140px_260px_210px_200px] xl:items-stretch xl:gap-0 xl:px-0 xl:[&>*]:flex xl:[&>*]:min-w-0 xl:[&>*]:flex-col xl:[&>*]:justify-center xl:[&>*]:border-r xl:[&>*]:border-gray-200 xl:[&>*]:px-4 xl:[&>*:first-child]:!flex-row xl:[&>*:first-child]:items-center xl:[&>*:last-child]:border-r-0"
                     >
                       <div className="flex min-w-0 gap-3">
                         <div className="h-20 w-20 flex-none overflow-hidden rounded-md border border-gray-200 bg-gray-100">
@@ -952,7 +952,7 @@ const ItemList: React.FC = () => {
                       </div>
 
                       <div className="flex items-center justify-end gap-1 border-t border-gray-100 pt-3 xl:!flex-row xl:items-center xl:justify-end xl:border-0 xl:pt-0">
-                        <div className="flex items-center gap-1">
+                        <div className="flex flex-wrap items-center justify-end gap-1">
                           <button
                             type="button"
                             onClick={() => openDetail(item)}
@@ -964,9 +964,11 @@ const ItemList: React.FC = () => {
                             <Edit className="h-4 w-4" />
                           </button>
                           <button type="button" onClick={() => setAIItem(item)}
-                            className="rounded-md p-2 text-gray-600 hover:bg-gray-100"
+                            disabled={busy}
+                            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-purple-50 px-2 py-2 text-xs font-semibold text-purple-700 hover:bg-purple-100 disabled:opacity-50"
                             title="商品 AI 提示词" aria-label="商品 AI 提示词">
                             <Sparkles className="h-4 w-4" />
+                            <span>AI 提示词</span>
                           </button>
                           <button
                             type="button"
