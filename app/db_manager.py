@@ -798,32 +798,6 @@ class DBManager:
             ON variant_delivery_bindings(user_id, card_id, enabled)
             ''')
 
-            # SKU 识别快照与按买家维度的防薅计数。复用 product_variants 的商品/SKU身份，
-            # 规则只保存于此表，避免改变现有卡密绑定语义。
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS delivery_sku_options (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cookie_id TEXT NOT NULL, item_id TEXT NOT NULL, sku_key TEXT NOT NULL,
-                sku_name TEXT NOT NULL, platform_sku_id TEXT, source TEXT NOT NULL DEFAULT 'order',
-                last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(cookie_id, item_id, sku_key)
-            )''')
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS delivery_sku_rules (
-                cookie_id TEXT NOT NULL, item_id TEXT NOT NULL, sku_key TEXT NOT NULL,
-                sku_name TEXT NOT NULL, max_deliveries INTEGER NOT NULL DEFAULT 1,
-                block_message TEXT NOT NULL DEFAULT '', enabled BOOLEAN NOT NULL DEFAULT 1,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY(cookie_id, item_id, sku_key)
-            )''')
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS delivery_sku_claims (
-                cookie_id TEXT NOT NULL, buyer_id TEXT NOT NULL, item_id TEXT NOT NULL,
-                sku_key TEXT NOT NULL, delivery_count INTEGER NOT NULL DEFAULT 0,
-                last_order_id TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY(cookie_id, buyer_id, item_id, sku_key)
-            )''')
-
             # 创建默认回复表
             cursor.execute('''
             CREATE TABLE IF NOT EXISTS default_replies (
@@ -6521,105 +6495,6 @@ class DBManager:
                 "cookie_id": cookie_id,
                 "item_id": item_id,
             }
-
-    @staticmethod
-    def normalize_delivery_sku_key(name: str = "", platform_sku_id: str = "", item_id: str = "") -> str:
-        sku_id = str(platform_sku_id or "").strip().lower()
-        if sku_id:
-            return f"id:{sku_id}"
-        normalized = " ".join(str(name or "").split()).lower()
-        if normalized:
-            return normalized
-        return f"single:{item_id}" if str(item_id or "").strip() else ""
-
-    def record_delivery_sku_option(self, cookie_id: str, item_id: str, sku_name: str = "",
-                                   platform_sku_id: str = "", source: str = "order",
-                                   sku_key: str = "") -> bool:
-        key = str(sku_key or "").strip().lower() or self.normalize_delivery_sku_key(sku_name, platform_sku_id, item_id)
-        if not key:
-            return False
-        name = " ".join(str(sku_name or '').split()) or (
-            f"SKU {platform_sku_id}" if str(platform_sku_id or '').strip() else '默认规格'
-        )
-        with self.lock:
-            self.conn.execute('''
-                INSERT INTO delivery_sku_options(cookie_id,item_id,sku_key,sku_name,platform_sku_id,source,last_seen_at)
-                VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP)
-                ON CONFLICT(cookie_id,item_id,sku_key) DO UPDATE SET
-                  sku_name=excluded.sku_name, platform_sku_id=COALESCE(excluded.platform_sku_id, platform_sku_id),
-                  source=excluded.source, last_seen_at=CURRENT_TIMESTAMP
-            ''', (cookie_id, item_id, key, name, str(platform_sku_id or '') or None, source))
-            self.conn.commit()
-        return True
-
-    def list_delivery_sku_options(self, cookie_id: str, item_id: str) -> List[Dict[str, Any]]:
-        with self.lock:
-            rows = self.conn.execute('''SELECT sku_key,sku_name,platform_sku_id,source,last_seen_at
-                FROM delivery_sku_options WHERE cookie_id=? AND item_id=? ORDER BY sku_name''',
-                                     (cookie_id, item_id)).fetchall()
-            if not rows:
-                variants = self.conn.execute('''SELECT display_name,platform_sku_id,source
-                    FROM product_variants WHERE cookie_id=? AND item_id=? AND enabled=1 ORDER BY id''',
-                    (cookie_id, item_id)).fetchall()
-                for name, sku_id, source in variants:
-                    key = self.normalize_delivery_sku_key(name, sku_id, item_id)
-                    if key:
-                        rows.append((key, ' '.join(str(name or '').split()) or f'SKU {sku_id}', sku_id or None, source or 'manual', None))
-        return [dict(zip(('key','name','platform_sku_id','source','last_seen_at'), row)) for row in rows]
-
-    def save_delivery_sku_rules(self, cookie_id: str, item_id: str, rules: List[Dict[str, Any]]) -> None:
-        with self.lock:
-            self.conn.execute('DELETE FROM delivery_sku_rules WHERE cookie_id=? AND item_id=?', (cookie_id, item_id))
-            for rule in (rules or [])[:100]:
-                key = str(rule.get('key') or '').strip().lower()
-                name = ' '.join(str(rule.get('name') or '').split())
-                if not key or not name:
-                    continue
-                limit = max(1, min(100, int(rule.get('max_deliveries') or 1)))
-                self.conn.execute('''INSERT OR REPLACE INTO delivery_sku_rules
-                    (cookie_id,item_id,sku_key,sku_name,max_deliveries,block_message,enabled,updated_at)
-                    VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)''',
-                    (cookie_id, item_id, key, name, limit, str(rule.get('block_message') or '').strip(),
-                     1 if rule.get('enabled', True) else 0))
-            self.conn.commit()
-
-    def claim_delivery_sku(self, cookie_id: str, buyer_id: str, item_id: str, sku_key: str,
-                           order_id: str) -> Dict[str, Any]:
-        """原子地领取一次 SKU 发货额度；同订单重试幂等，超限不增加计数。"""
-        if not buyer_id or not sku_key:
-            return {'allowed': True, 'configured': False}
-        with self.lock:
-            cur = self.conn.cursor()
-            cur.execute('BEGIN IMMEDIATE')
-            rule = cur.execute('''SELECT max_deliveries,block_message FROM delivery_sku_rules
-                WHERE cookie_id=? AND item_id=? AND sku_key=? AND enabled=1''',
-                (cookie_id, item_id, sku_key)).fetchone()
-            if not rule:
-                self.conn.commit(); return {'allowed': True, 'configured': False}
-            row = cur.execute('''SELECT delivery_count,last_order_id FROM delivery_sku_claims
-                WHERE cookie_id=? AND buyer_id=? AND item_id=? AND sku_key=?''',
-                (cookie_id, buyer_id, item_id, sku_key)).fetchone()
-            if row and str(row[1] or '') == str(order_id or ''):
-                self.conn.commit(); return {'allowed': True, 'configured': True, 'count': row[0]}
-            count = int(row[0]) if row else 0
-            if count >= int(rule[0]):
-                self.conn.commit(); return {'allowed': False, 'configured': True, 'count': count,
-                                            'max_deliveries': int(rule[0]), 'block_message': rule[1] or ''}
-            if row:
-                cur.execute('''UPDATE delivery_sku_claims SET delivery_count=?,last_order_id=?,updated_at=CURRENT_TIMESTAMP
-                    WHERE cookie_id=? AND buyer_id=? AND item_id=? AND sku_key=?''',
-                    (count + 1, order_id, cookie_id, buyer_id, item_id, sku_key))
-            else:
-                cur.execute('''INSERT INTO delivery_sku_claims(cookie_id,buyer_id,item_id,sku_key,delivery_count,last_order_id)
-                    VALUES(?,?,?,?,?,?)''', (cookie_id, buyer_id, item_id, sku_key, 1, order_id))
-            self.conn.commit()
-            return {'allowed': True, 'configured': True, 'count': count + 1, 'max_deliveries': int(rule[0])}
-
-    def list_delivery_sku_blocks(self, cookie_id: str, limit: int = 50) -> List[Dict[str, Any]]:
-        with self.lock:
-            rows = self.conn.execute('''SELECT buyer_id,item_id,sku_key,delivery_count,last_order_id,updated_at
-                FROM delivery_sku_claims WHERE cookie_id=? ORDER BY updated_at DESC LIMIT ?''', (cookie_id, limit)).fetchall()
-        return [dict(zip(('buyer_id','item_id','sku_key','delivery_count','last_order_id','updated_at'), row)) for row in rows]
 
     def increment_variant_binding_delivery_times(self, binding_id: int) -> bool:
         with self.lock:

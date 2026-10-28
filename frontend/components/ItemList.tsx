@@ -1206,18 +1206,6 @@ const ItemList: React.FC = () => {
                                     placeholder="周期=周卡 | 版本=独享"
                                   />
                                 </div>
-                                <div className="sm:col-span-2">
-                                  <label className="field-label" htmlFor={`variant-sku-${variant.clientId}`}>
-                                    闲鱼 SKU ID <span className="font-normal text-gray-400">（可选，填写后优先匹配）</span>
-                                  </label>
-                                  <input
-                                    id={`variant-sku-${variant.clientId}`}
-                                    value={variant.platformSkuId}
-                                    onChange={event => updateDeliveryVariant(variant.clientId, { platformSkuId: event.target.value })}
-                                    className="ios-input w-full rounded-md px-3 py-2.5 font-mono"
-                                    placeholder="从订单或商品接口获取的平台规格 ID"
-                                  />
-                                </div>
                               </>
                             )}
 

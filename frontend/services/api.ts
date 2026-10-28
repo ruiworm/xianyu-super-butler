@@ -653,50 +653,6 @@ export const saveItemDeliveryConfig = async (
   );
 }
 
-export type DeliverySkuOption = {
-  key: string;
-  name: string;
-  platform_sku_id?: string;
-  source?: string;
-};
-
-export type DeliverySkuDiscovery = {
-  options: DeliverySkuOption[];
-  detection_status: string;
-  retry_after_seconds?: number;
-  warning?: string;
-};
-
-const normalizeDeliverySkuDiscovery = (data: Partial<DeliverySkuDiscovery>): DeliverySkuDiscovery => ({
-  options: data.options || [],
-  detection_status: data.detection_status || 'ok',
-  retry_after_seconds: data.retry_after_seconds,
-  warning: data.warning,
-});
-
-export const getDeliverySkuOptions = async (cookieId: string, itemId: string): Promise<DeliverySkuDiscovery> => {
-  const response = await get<Partial<DeliverySkuDiscovery>>(
-    `/api/anti-abuse/sku-options/${encodeURIComponent(itemId)}`,
-    { cookie_id: cookieId },
-  );
-  return normalizeDeliverySkuDiscovery(response);
-};
-
-/** 卖家接口返回 unauthorized 后由用户显式触发的买家接口兜底，只调一次、不自动重试。 */
-export const buyerTestDeliverySkuOptions = async (cookieId: string, itemId: string): Promise<DeliverySkuDiscovery> => {
-  const response = await get<Partial<DeliverySkuDiscovery>>(
-    `/api/anti-abuse/sku-options/${encodeURIComponent(itemId)}/buyer-test`,
-    { cookie_id: cookieId },
-  );
-  return normalizeDeliverySkuDiscovery(response);
-};
-
-export const saveDeliverySkuRules = async (cookieId: string, itemId: string, skus: Array<{
-  key: string; name: string; max_deliveries: number; block_message: string; enabled: boolean;
-}>): Promise<void> => {
-  await put(`/api/anti-abuse/sku-configs/${encodeURIComponent(itemId)}?cookie_id=${encodeURIComponent(cookieId)}`, { skus });
-};
-
 // Product Automation
 export const getProductMaterials = async (cookieId?: string): Promise<ProductMaterial[]> => {
   const response = await get<{ success: boolean; data: ProductMaterial[] }>(
