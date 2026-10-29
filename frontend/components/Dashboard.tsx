@@ -32,7 +32,7 @@ const StatusBadge: React.FC<{ status: OrderStatus }> = ({ status }) => {
   );
 };
 
-const StatCard: React.FC<{ title: string; value: string | number; icon: React.ElementType; colorClass: string; trend?: string }> = ({ title, value, icon: Icon, colorClass, trend }) => (
+const StatCard: React.FC<{ title: string; value: string | number; icon: React.ElementType; colorClass: string; trend?: string; description?: string }> = ({ title, value, icon: Icon, colorClass, trend, description }) => (
   <div className="metric-card">
     <div className="flex items-start justify-between gap-3">
       <span className={`flex h-9 w-9 items-center justify-center rounded-md ${colorClass}`}>
@@ -44,6 +44,7 @@ const StatCard: React.FC<{ title: string; value: string | number; icon: React.El
     </div>
     <p className="metric-card__value">{value}</p>
     <p className="metric-card__label mt-1">{title}</p>
+    {description && <p className="mt-1 text-xs text-gray-500">{description}</p>}
   </div>
 );
 
@@ -52,6 +53,7 @@ type TimeRange = 'today' | 'yesterday' | '3days' | '7days' | '30days' | 'custom'
 const Dashboard: React.FC = () => {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [analytics, setAnalytics] = useState<OrderAnalytics | null>(null);
+  const [lifetimeAnalytics, setLifetimeAnalytics] = useState<OrderAnalytics | null>(null);
   const [timeRange, setTimeRange] = useState<TimeRange>('7days');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
@@ -269,15 +271,17 @@ const Dashboard: React.FC = () => {
       setDashboardError(null);
 
       try {
-        const [statsData, itemData] = await Promise.all([
+        const [statsData, itemData, , lifetimeData] = await Promise.all([
           getAdminStats(),
           getItems(),
           loadAnalytics(timeRange),
+          getOrderAnalytics({}),
         ]);
 
         if (cancelled) return;
 
         setStats(statsData);
+        setLifetimeAnalytics(lifetimeData);
         setItems(itemData);
 
         const nameMap: Record<string, string> = {};
@@ -484,6 +488,13 @@ const Dashboard: React.FC = () => {
 
       {/* Stats Grid */}
       <div className="metric-grid">
+        <StatCard
+          title="累计有效成交额（全部时间）"
+          value={lifetimeAnalytics ? `¥${lifetimeAnalytics.revenue_stats.total_amount.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+          icon={DollarSign}
+          colorClass="bg-[#ffe100]"
+          description="待发货、已发货和已完成的订单；不等同于已到账金额。"
+        />
         <StatCard
           title="有效成交额 (CNY)"
           value={`¥${analytics.revenue_stats.total_amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}`}

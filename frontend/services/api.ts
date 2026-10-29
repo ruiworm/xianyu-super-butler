@@ -510,8 +510,8 @@ export const deleteAdminUser = async (userId: number): Promise<ApiResponse> => {
   return del(`/admin/users/${userId}`);
 };
 
-export const getOrderAnalytics = async (daysOrParams: number | {start_date: string; end_date: string} = 7): Promise<OrderAnalytics> => {
-    let params: {start_date: string; end_date: string};
+export const getOrderAnalytics = async (daysOrParams: number | {start_date?: string; end_date?: string} = 7): Promise<OrderAnalytics> => {
+    let params: {start_date?: string; end_date?: string};
 
     if (typeof daysOrParams === 'number') {
         const endDate = new Date();
