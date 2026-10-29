@@ -1,8 +1,6 @@
 import React, { Suspense, lazy, useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import GlobalFeedback from './components/GlobalFeedback';
-import AnnouncementBanner from './components/AnnouncementBanner';
-import ThemeToggle from './components/ThemeToggle';
 import CaptchaInput from './components/CaptchaInput';
 import { useCaptcha } from './lib/useCaptcha';
 import { validateEmail, validatePassword, validateUsername } from './lib/authValidation';
@@ -21,7 +19,6 @@ const Keywords = lazy(() => import('./components/Keywords'));
 const MessageManagement = lazy(() => import('./components/MessageManagement'));
 const NotificationsAndLogs = lazy(() => import('./components/NotificationsAndLogs'));
 const UserManagement = lazy(() => import('./components/UserManagement'));
-const About = lazy(() => import('./components/About'));
 const BuyerInteraction = lazy(() => import('./components/BuyerInteraction'));
 
 const PageLoader = () => (
@@ -45,7 +42,6 @@ const pageLabels: Record<string, string> = {
   notifications: '通知与日志',
   settings: '系统设置',
   users: '用户管理',
-  about: '关于',
 };
 
 // 系统级页面仅管理员可用；普通用户 localStorage 里残留这些 tab 时切回总览
@@ -53,7 +49,7 @@ const ADMIN_ONLY_TABS = ['settings', 'users'];
 
 const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('active_page') || 'dashboard');
+  const [activeTab, setActiveTab] = useState(() => { const page = localStorage.getItem('active_page'); return !page || page === 'about' ? 'dashboard' : page; });
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -62,6 +58,7 @@ const App: React.FC = () => {
   // 注册成功后回到登录页时的提示
   const [loginNotice, setLoginNotice] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
   // 注册相关。是否显示入口由后台「允许用户注册」控制，
@@ -268,7 +265,6 @@ const App: React.FC = () => {
   if (!isLoggedIn) {
     return (
       <div className="relative min-h-screen bg-[var(--app-bg)] p-4 font-sans text-[var(--text)] sm:p-6">
-        <ThemeToggle compact className="absolute right-4 top-4 z-10 sm:right-6 sm:top-6" />
         <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-5xl items-center justify-center sm:min-h-[calc(100vh-3rem)]">
           <div className="grid w-full overflow-hidden rounded-3xl bg-[var(--surface)] lg:grid-cols-[1.05fr_0.95fr]"
                style={{ border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)' }}>
@@ -537,6 +533,8 @@ const App: React.FC = () => {
           setActiveTab(tab);
           setMobileMenuOpen(false);
         }}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed(value => !value)}
         mobileOpen={mobileMenuOpen}
         onMobileClose={() => setMobileMenuOpen(false)}
         isAdmin={isAdmin}
@@ -547,7 +545,8 @@ const App: React.FC = () => {
         }} 
       />
       
-      <main className="min-h-screen min-w-0 flex-1 overflow-y-auto lg:ml-[248px]">
+      <main className={`min-h-screen min-w-0 flex-1 overflow-y-auto ${sidebarCollapsed ? 'lg:ml-0' : 'lg:ml-[248px]'}`}>
+        {sidebarCollapsed && <button type="button" onClick={() => setSidebarCollapsed(false)} className="fixed left-2 top-2 z-30 hidden rounded bg-white p-2 shadow lg:block" aria-label="展开侧栏">☰</button>}
         <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-4 lg:hidden">
           <button
             type="button"
@@ -562,9 +561,7 @@ const App: React.FC = () => {
             <p className="truncate text-sm font-bold">{pageLabels[activeTab] || '闲鱼超级管家'}</p>
             <p className="text-[11px] text-gray-400">闲鱼超级管家</p>
           </div>
-          <ThemeToggle compact className="ml-auto" />
         </header>
-        {activeTab !== 'messages' && <AnnouncementBanner />}
         <div className={
           activeTab === 'messages'
             ? 'h-[calc(100vh-3.5rem)] lg:h-screen overflow-hidden'
@@ -617,9 +614,6 @@ const App: React.FC = () => {
           )}
           <section hidden={activeTab !== 'buyer-interaction'}>
             <Suspense fallback={activeTab === 'buyer-interaction' ? <PageLoader /> : null}><BuyerInteraction /></Suspense>
-          </section>
-          <section hidden={activeTab !== 'about'}>
-            <Suspense fallback={activeTab === 'about' ? <PageLoader /> : null}><About /></Suspense>
           </section>
         </div>
       </main>

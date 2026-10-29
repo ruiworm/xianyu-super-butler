@@ -69,13 +69,13 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
-  const resolvedTheme = theme === 'system' ? systemTheme : theme;
+  const resolvedTheme: ResolvedTheme = 'light';
 
   useLayoutEffect(() => {
     const root = document.documentElement;
     root.dataset.theme = resolvedTheme;
     root.dataset.themePreference = theme;
-    root.classList.toggle('dark', resolvedTheme === 'dark');
+    root.classList.remove('dark');
     root.style.colorScheme = resolvedTheme;
     try {
       window.localStorage.setItem(THEME_STORAGE_KEY, theme);

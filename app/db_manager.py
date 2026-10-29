@@ -2967,9 +2967,9 @@ class DBManager:
                     account_base_url = result[3]
                     
                     # 如果账号值为空或等于硬编码默认值，则使用系统设置
-                    use_model = account_model if (account_model and account_model != DEFAULT_MODEL) else system_model
-                    use_api_key = account_api_key if account_api_key else system_api_key
-                    use_base_url = account_base_url if (account_base_url and account_base_url != DEFAULT_BASE_URL) else system_base_url
+                    use_model = self.get_system_setting('ai_model') or account_model or DEFAULT_MODEL
+                    use_api_key = system_api_key or account_api_key
+                    use_base_url = self.get_system_setting('ai_api_url') or account_base_url or DEFAULT_BASE_URL
                     
                     return {
                         'ai_enabled': bool(result[0]),

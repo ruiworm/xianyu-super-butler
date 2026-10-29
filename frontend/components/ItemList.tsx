@@ -42,7 +42,6 @@ import {
 } from '../services/api';
 import { confirmAction } from '../services/feedback';
 import DeliveryProtection from './DeliveryProtection';
-import ItemAIPromptEditor from './ItemAIPromptEditor';
 import CardDeliveryTemplateSettings from './CardDeliveryTemplateSettings';
 import GeneralDeliveryRules from './GeneralDeliveryRules';
 import {EmptyState, NoticeBanner, PageHeader, PageLoading, PageTabs} from './ui';
@@ -199,7 +198,6 @@ const ItemList: React.FC = () => {
   const [notice, setNotice] = useState<Notice>(null);
 
   const [detailItem, setDetailItem] = useState<Item | null>(null);
-  const [aiItem, setAIItem] = useState<Item | null>(null);
   const [itemDetail, setItemDetail] = useState('');
   const [deliveryItem, setDeliveryItem] = useState<Item | null>(null);
   const [deliveryLoading, setDeliveryLoading] = useState(false);
@@ -963,13 +961,6 @@ const ItemList: React.FC = () => {
                           >
                             <Edit className="h-4 w-4" />
                           </button>
-                          <button type="button" onClick={() => setAIItem(item)}
-                            disabled={busy}
-                            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-purple-50 px-2 py-2 text-xs font-semibold text-purple-700 hover:bg-purple-100 disabled:opacity-50"
-                            title="商品 AI 提示词" aria-label="商品 AI 提示词">
-                            <Sparkles className="h-4 w-4" />
-                            <span>AI 提示词</span>
-                          </button>
                           <button
                             type="button"
                             onClick={() => handleDelete(item)}
@@ -1288,7 +1279,6 @@ const ItemList: React.FC = () => {
         document.body,
       )}
 
-      {aiItem && <ItemAIPromptEditor item={aiItem} onClose={() => setAIItem(null)} />}
       {detailItem && createPortal(
         <div className="modal-overlay">
           <div className="modal-container">

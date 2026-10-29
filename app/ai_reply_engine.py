@@ -207,11 +207,18 @@ class AIReplyEngine:
         """调用OpenAI兼容API"""
         try:
             logger.info(f"调用OpenAI API: model={settings['model_name']}, base_url={settings.get('base_url', 'default')}")
+            effort = db_manager.get_system_setting('ai_reasoning_effort') or 'default'
+            extra = {}
+            if effort in ('off', 'low', 'medium', 'high'):
+                if 'qwen' in settings['model_name'].lower():
+                    extra['extra_body'] = {'enable_thinking': effort != 'off'}
+                    if effort != 'off':
+                        extra['extra_body']['thinking_budget'] = {'low': 512, 'medium': 2048, 'high': 8192}[effort]
+                else:
+                    extra['reasoning_effort'] = 'none' if effort == 'off' else effort
             response = client.chat.completions.create(
-                model=settings['model_name'],
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature
+                model=settings['model_name'], messages=messages,
+                max_tokens=max_tokens, temperature=temperature, **extra
             )
             return self._extract_openai_content(response)
         except Exception as e:

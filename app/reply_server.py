@@ -4037,6 +4037,9 @@ def update_system_setting(key: str, setting_data: SystemSettingIn,
     """更新系统设置"""
     from app.db_manager import db_manager
     try:
+        if key == 'ai_reasoning_effort' and setting_data.value not in ('default', 'off', 'low', 'medium', 'high'):
+            raise HTTPException(status_code=400, detail='无效的思考等级')
+
         # 禁止直接修改密码哈希
         if key == 'admin_password_hash':
             raise HTTPException(status_code=400, detail='请使用密码修改接口')

@@ -11,6 +11,7 @@ type KeywordsMode = 'reply' | 'delivery';
 
 interface KeywordsProps {
   mode: KeywordsMode;
+  accountId?: string;
 }
 
 interface Keyword {
@@ -37,9 +38,10 @@ interface DefaultReplyForm {
   reply_image_url: string;
 }
 
-const Keywords: React.FC<KeywordsProps> = ({ mode }) => {
+const Keywords: React.FC<KeywordsProps> = ({ mode, accountId }) => {
   const [accounts, setAccounts] = useState<AccountDetail[]>([]);
-  const [selectedAccount, setSelectedAccount] = useState<string>('');
+  const [selectedAccount, setSelectedAccount] = useState<string>(accountId || '');
+  useEffect(() => { if (accountId) setSelectedAccount(accountId); }, [accountId]);
   const [activeTab, setActiveTab] = useState<ReplyTabType>('reply');
 
   // 关键词回复相关状态
@@ -409,6 +411,7 @@ const Keywords: React.FC<KeywordsProps> = ({ mode }) => {
                 id="reply-account"
                 className="ios-input rounded-md px-3 py-2.5 text-sm sm:min-w-64"
                 value={selectedAccount}
+                disabled={Boolean(accountId)}
                 onChange={(event) => setSelectedAccount(event.target.value)}
               >
                 <option value="">请选择账号</option>
