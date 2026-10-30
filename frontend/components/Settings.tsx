@@ -636,6 +636,18 @@ const Settings: React.FC = () => {
             </label>
 
             <label className="lg:col-span-2">
+              <span className="field-label">系统客服提示词</span>
+              <textarea
+                className="ios-input min-h-52 w-full resize-y rounded-md px-3 py-2.5 text-sm"
+                maxLength={10000}
+                value={settings.ai_system_prompt || ''}
+                onChange={(event) => setSettings({ ...settings, ai_system_prompt: event.target.value })}
+                placeholder="设置所有账号共用的客服回复风格"
+              />
+              <span className="mt-1 block text-xs text-gray-500">默认已填入自然客服风格。商品专属规则、订单状态和议价边界仍会一起生效；清空后使用默认提示词。</span>
+            </label>
+
+            <label className="lg:col-span-2">
               <span className="field-label">默认自动回复内容</span>
               <textarea
                 className="ios-input min-h-28 w-full resize-y rounded-md px-3 py-2.5 text-sm"

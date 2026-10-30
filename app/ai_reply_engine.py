@@ -19,6 +19,7 @@ from typing import List, Dict, Optional
 from loguru import logger
 from openai import OpenAI
 from app.db_manager import db_manager
+from app.ai_prompts import DEFAULT_CUSTOMER_SERVICE_PROMPT
 
 
 class ReasoningBudgetExhausted(RuntimeError):
@@ -48,7 +49,7 @@ class AIReplyEngine:
             'classify': '''你是一个意图分类专家...（此提示词已不再被 detect_intent 使用）''',
             
             'price': '''你是一位经验丰富的销售专家，擅长议价。
-语言要求：简短直接，每句≤10字，总字数≤40字。
+语言要求：简短自然，以说明白为准。
 议价策略：
 1. 根据议价次数递减优惠：第1次小幅优惠，第2次中等优惠，第3次最大优惠
 2. 接近最大议价轮数时要坚持底线，强调商品价值
@@ -57,12 +58,12 @@ class AIReplyEngine:
 注意：结合商品信息、对话历史和议价设置，给出合适的回复。''',
             
             'tech': '''你是一位技术专家，专业解答产品相关问题。
-语言要求：简短专业，每句≤10字，总字数≤40字。
+语言要求：自然清楚，不用生硬的专业术语。
 回答重点：产品功能、使用方法、注意事项。
 注意：基于商品信息回答，避免过度承诺。''',
             
             'default': '''你是一位资深电商卖家，提供优质客服。
-语言要求：简短友好，每句≤10字，总字数≤40字。
+语言要求：自然友好，按买家的问题调整回复长度。
 回答重点：商品介绍、物流、售后等常见问题。
 注意：结合商品信息，给出实用建议。'''
         }
@@ -702,6 +703,9 @@ class AIReplyEngine:
                     settings.get('custom_prompts', ''),
                     intent,
                 )
+                global_prompt = db_manager.get_system_setting('ai_system_prompt')
+                global_prompt = global_prompt.strip() if isinstance(global_prompt, str) else ''
+                system_prompt = (global_prompt or DEFAULT_CUSTOMER_SERVICE_PROMPT) + '\n\n账号回复规则：\n' + system_prompt
                 item_prompt = db_manager.get_item_ai_prompt(cookie_id, item_id)
                 if item_prompt.strip():
                     system_prompt += '\n\n当前商品专属规则（商品事实以此为准）：\n' + item_prompt

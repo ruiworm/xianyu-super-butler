@@ -3,12 +3,21 @@ import unittest
 from unittest.mock import Mock, patch
 
 from app.ai_reply_engine import AIReplyEngine
-from app.reply_server import _public_ai_reply_settings
+from app.ai_prompts import DEFAULT_CUSTOMER_SERVICE_PROMPT
+from app.reply_server import _public_ai_reply_settings, get_system_settings
 
 
 class AIReplyEngineTests(unittest.TestCase):
     def setUp(self):
         self.engine = AIReplyEngine()
+
+    def test_system_settings_expose_default_and_preserve_custom_prompt(self):
+        with patch('app.db_manager.db_manager') as database:
+            database.get_all_system_settings.return_value = {}
+            self.assertEqual(get_system_settings({'username': 'admin'})['ai_system_prompt'], DEFAULT_CUSTOMER_SERVICE_PROMPT)
+            database.get_all_system_settings.return_value = {'ai_system_prompt': '卖家自定义风格'}
+            self.assertEqual(get_system_settings({'username': 'admin'})['ai_system_prompt'], '卖家自定义风格')
+            self.assertNotIn('ai_system_prompt', get_system_settings({'username': 'member'}))
 
     def test_plain_text_custom_prompt_is_supported(self):
         prompt = self.engine._resolve_system_prompt("不要承诺库存，回复保持简短。", "default")
@@ -59,6 +68,7 @@ class AIReplyEngineTests(unittest.TestCase):
                 return_value='  "有货，可以直接拍。"  ',
             ) as call_openai,
             patch("app.ai_reply_engine.db_manager.get_ai_reply_settings", return_value=settings),
+            patch("app.ai_reply_engine.db_manager.get_system_setting", return_value='系统客服风格：自然回答。'),
             patch("app.ai_reply_engine.db_manager.get_item_ai_prompt", return_value='本商品交付密钥和链接。') as item_prompt,
         ):
             reply = self.engine.generate_reply(
@@ -77,6 +87,9 @@ class AIReplyEngineTests(unittest.TestCase):
         item_prompt.assert_called_once_with('account-1', 'item-1')
         self.assertIn('本商品交付密钥和链接。', messages[0]['content'])
         self.assertIn('回复保持简短。', messages[0]['content'])
+        self.assertIn('系统客服风格：自然回答。', messages[0]['content'])
+        self.assertIn('本商品交付密钥和链接。', messages[0]['content'])
+        self.assertIn('未经系统确认，不得声称', messages[0]['content'])
         self.assertEqual(
             [entry["content"] for entry in messages if entry["role"] == "user"],
             ["有货吗"],

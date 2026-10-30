@@ -547,6 +547,7 @@ export interface OrderAnalytics {
 
 // Settings
 export interface SystemSettings {
+  ai_system_prompt?: string;
   ai_model?: string;
   ai_reasoning_effort?: string;
   ai_api_key?: string;

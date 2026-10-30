@@ -24,6 +24,7 @@ from app.delivery_template import send_payload as send_delivery_payload
 from app.product_automation import ProductAutomationService
 from app.file_log_collector import setup_file_logging, get_file_log_collector
 from app.ai_reply_engine import ai_reply_engine
+from app.ai_prompts import DEFAULT_CUSTOMER_SERVICE_PROMPT
 from app.services.notification_channels import (
     NOTIFICATION_CHANNEL_REQUIRED_FIELDS,
     NOTIFICATION_CHANNEL_TYPE_ALIASES,
@@ -4021,6 +4022,8 @@ def get_system_settings(current_user: Dict[str, Any] = Depends(require_auth)):
     }
     try:
         settings = db_manager.get_all_system_settings()
+        if current_user['username'] == ADMIN_USERNAME and not settings.get('ai_system_prompt'):
+            settings['ai_system_prompt'] = DEFAULT_CUSTOMER_SERVICE_PROMPT
         # 移除敏感信息
         if 'admin_password_hash' in settings:
             del settings['admin_password_hash']
@@ -4039,6 +4042,8 @@ def update_system_setting(key: str, setting_data: SystemSettingIn,
     try:
         if key == 'ai_reasoning_effort' and setting_data.value not in ('default', 'off', 'low', 'medium', 'high'):
             raise HTTPException(status_code=400, detail='无效的思考等级')
+        if key == 'ai_system_prompt' and len(setting_data.value) > 10000:
+            raise HTTPException(status_code=400, detail='系统客服提示词不能超过10000字')
 
         # 禁止直接修改密码哈希
         if key == 'admin_password_hash':
