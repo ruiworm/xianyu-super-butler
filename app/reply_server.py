@@ -6267,6 +6267,98 @@ class ItemAIPromptRequest(BaseModel):
     prompt: str = Field(default="", max_length=10000)
 
 
+class AIPromptGroupRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    prompt: str = Field(min_length=1, max_length=10000)
+    item_ids: List[str] = Field(default_factory=list, max_length=500)
+
+
+@app.get('/ai-prompt-groups/{cookie_id}')
+def list_ai_prompt_groups(cookie_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    if cookie_id not in db_manager.get_all_cookies(current_user['user_id']):
+        raise HTTPException(403, '无权限操作该账号')
+    with db_manager.lock:
+        # Preserve previously configured per-product prompts and combine equal
+        # prompts into one reusable rule the first time the new editor is opened.
+        conn = db_manager.conn
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            legacy = conn.execute('''SELECT p.item_id,p.prompt FROM item_ai_prompts p
+                JOIN item_info i ON i.cookie_id=p.cookie_id AND i.item_id=p.item_id
+                WHERE p.cookie_id=? AND p.prompt<>'' AND NOT EXISTS (
+                    SELECT 1 FROM ai_prompt_group_items x WHERE x.cookie_id=p.cookie_id AND x.item_id=p.item_id
+                ) ORDER BY p.item_id''', (cookie_id,)).fetchall()
+            for item_id, prompt in legacy:
+                existing = conn.execute('SELECT id FROM ai_prompt_groups WHERE cookie_id=? AND prompt=? ORDER BY id LIMIT 1', (cookie_id, prompt)).fetchone()
+                if existing:
+                    group_id = existing[0]
+                else:
+                    group_id = conn.execute('SELECT COALESCE(MAX(id),0)+1 FROM ai_prompt_groups WHERE cookie_id=?', (cookie_id,)).fetchone()[0]
+                    conn.execute('INSERT INTO ai_prompt_groups(cookie_id,id,name,prompt) VALUES(?,?,?,?)',
+                                 (cookie_id, group_id, f'已有提示词（{item_id}）'[:80], prompt))
+                conn.execute('INSERT INTO ai_prompt_group_items(cookie_id,item_id,group_id) VALUES(?,?,?)', (cookie_id, item_id, group_id))
+                conn.execute('DELETE FROM item_ai_prompts WHERE cookie_id=? AND item_id=?', (cookie_id, item_id))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        groups = db_manager.conn.execute('SELECT id,name,prompt FROM ai_prompt_groups WHERE cookie_id=? ORDER BY id', (cookie_id,)).fetchall()
+        links = db_manager.conn.execute('SELECT group_id,item_id FROM ai_prompt_group_items WHERE cookie_id=? ORDER BY item_id', (cookie_id,)).fetchall()
+    return {'groups': [{'id': row[0], 'name': row[1], 'prompt': row[2],
+                        'item_ids': [link[1] for link in links if link[0] == row[0]]} for row in groups]}
+
+
+@app.put('/ai-prompt-groups/{cookie_id}/{group_id}')
+def save_ai_prompt_group(cookie_id: str, group_id: int, data: AIPromptGroupRequest,
+                         current_user: Dict[str, Any] = Depends(get_current_user)):
+    if cookie_id not in db_manager.get_all_cookies(current_user['user_id']):
+        raise HTTPException(403, '无权限操作该账号')
+    name, prompt = data.name.strip(), data.prompt.strip()
+    item_ids = list(dict.fromkeys(data.item_ids))
+    if not name or not prompt or any(not item or len(item) > 100 for item in item_ids):
+        raise HTTPException(400, '请填写提示词名称和内容，并选择有效商品')
+    with db_manager.lock:
+        conn = db_manager.conn
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            if group_id:
+                row = conn.execute('SELECT id FROM ai_prompt_groups WHERE id=? AND cookie_id=?', (group_id, cookie_id)).fetchone()
+                if not row:
+                    raise HTTPException(404, '提示词不存在')
+            for item_id in item_ids:
+                if not conn.execute('SELECT 1 FROM item_info WHERE cookie_id=? AND item_id=?', (cookie_id, item_id)).fetchone():
+                    raise HTTPException(400, '所选商品不存在，请刷新后重试')
+            if group_id:
+                conn.execute('UPDATE ai_prompt_groups SET name=?,prompt=? WHERE id=? AND cookie_id=?', (name, prompt, group_id, cookie_id))
+                conn.execute('DELETE FROM ai_prompt_group_items WHERE group_id=? AND cookie_id=?', (group_id, cookie_id))
+            else:
+                group_id = conn.execute('SELECT COALESCE(MAX(id),0)+1 FROM ai_prompt_groups WHERE cookie_id=?', (cookie_id,)).fetchone()[0]
+                conn.execute('INSERT INTO ai_prompt_groups(cookie_id,id,name,prompt) VALUES(?,?,?,?)', (cookie_id, group_id, name, prompt))
+            for item_id in item_ids:
+                conn.execute('DELETE FROM item_ai_prompts WHERE cookie_id=? AND item_id=?', (cookie_id, item_id))
+                conn.execute('''INSERT INTO ai_prompt_group_items(cookie_id,item_id,group_id) VALUES(?,?,?)
+                    ON CONFLICT(cookie_id,item_id) DO UPDATE SET group_id=excluded.group_id''', (cookie_id, item_id, group_id))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    return {'id': group_id}
+
+
+@app.delete('/ai-prompt-groups/{cookie_id}/{group_id}')
+def delete_ai_prompt_group(cookie_id: str, group_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    if cookie_id not in db_manager.get_all_cookies(current_user['user_id']):
+        raise HTTPException(403, '无权限操作该账号')
+    with db_manager.lock:
+        conn = db_manager.conn
+        conn.execute('DELETE FROM ai_prompt_group_items WHERE cookie_id=? AND group_id=?', (cookie_id, group_id))
+        deleted = conn.execute('DELETE FROM ai_prompt_groups WHERE cookie_id=? AND id=?', (cookie_id, group_id))
+        conn.commit()
+    if not deleted.rowcount:
+        raise HTTPException(404, '提示词不存在')
+    return {'success': True}
+
+
 def _check_item_ai_access(cookie_id: str, item_id: str, current_user: dict):
     if cookie_id not in db_manager.get_all_cookies(current_user['user_id']):
         raise HTTPException(status_code=403, detail='无权限操作该账号')

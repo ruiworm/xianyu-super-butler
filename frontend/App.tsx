@@ -545,8 +545,7 @@ const App: React.FC = () => {
         }} 
       />
       
-      <main className={`min-h-screen min-w-0 flex-1 overflow-y-auto ${sidebarCollapsed ? 'lg:ml-0' : 'lg:ml-[248px]'}`}>
-        {sidebarCollapsed && <button type="button" onClick={() => setSidebarCollapsed(false)} className="fixed left-2 top-2 z-30 hidden rounded bg-white p-2 shadow lg:block" aria-label="展开侧栏">☰</button>}
+      <main className={`min-h-screen min-w-0 flex-1 overflow-y-auto ${sidebarCollapsed ? 'lg:ml-[64px]' : 'lg:ml-[248px]'}`}>
         <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-[var(--border)] bg-[var(--surface)] px-4 lg:hidden">
           <button
             type="button"

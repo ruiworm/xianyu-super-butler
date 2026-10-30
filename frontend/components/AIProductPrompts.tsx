@@ -1,49 +1,63 @@
-import React, { useEffect, useState } from 'react';
-import { getItems, getItemAIPrompt, saveItemAIPrompt } from '../services/api';
+import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { getItems } from '../services/api';
+import { get, put, del } from '../lib/request';
 import { Item } from '../types';
-import { notify } from '../services/feedback';
+import { confirmAction, notify } from '../services/feedback';
+
+type PromptGroup = { id: number; name: string; prompt: string; item_ids: string[] };
+const endpoint = (id: string) => `/ai-prompt-groups/${encodeURIComponent(id)}`;
 
 export default function AIProductPrompts({ accountId }: { accountId: string }) {
   const [items, setItems] = useState<Item[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [prompt, setPrompt] = useState('');
+  const [groups, setGroups] = useState<PromptGroup[]>([]);
+  const [editing, setEditing] = useState<PromptGroup | null>(null);
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [loadingPrompt, setLoadingPrompt] = useState(false);
-  const [promptError, setPromptError] = useState(false);
+  const [error, setError] = useState('');
+  const reload = async () => {
+    const [products, result] = await Promise.all([getItems(), get<{groups: PromptGroup[]}>(endpoint(accountId))]);
+    setItems(products.filter(item => item.cookie_id === accountId));
+    setGroups(result.groups);
+  };
   useEffect(() => {
     let active = true;
-    setItems([]); setSelected([]); setPrompt('');
-    getItems().then(data => { if (active) setItems(data.filter(item => item.cookie_id === accountId)); })
-      .catch(() => { if (active) notify('商品列表加载失败', 'error'); });
+    setLoading(true); setError(''); setEditing(null);
+    Promise.all([getItems(), get<{groups: PromptGroup[]}>(endpoint(accountId))])
+      .then(([products, result]) => { if (active) { setItems(products.filter(item => item.cookie_id === accountId)); setGroups(result.groups); } })
+      .catch(() => { if (active) setError('提示词或商品加载失败，请刷新后重试'); })
+      .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [accountId]);
-  useEffect(() => {
-    setPromptError(false);
-    if (selected.length !== 1) { setLoadingPrompt(false); return; }
-    let active = true;
-    setLoadingPrompt(true);
-    getItemAIPrompt(accountId, selected[0]).then(result => { if (active) setPrompt(result.prompt); })
-      .catch(() => { if (active) { setPromptError(true); notify('提示词加载失败，请重新选择商品', 'error'); } })
-      .finally(() => { if (active) setLoadingPrompt(false); });
-    return () => { active = false; };
-  }, [accountId, selected]);
+  const filtered = useMemo(() => items.filter(item => `${item.item_title || ''} ${item.item_id}`.toLowerCase().includes(query.trim().toLowerCase())), [items, query]);
   const save = async () => {
-    if (!selected.length) { notify('请至少选择一个商品', 'warning'); return; }
+    if (!editing || !editing.name.trim() || !editing.prompt.trim()) { notify('请填写提示词名称和内容', 'warning'); return; }
     setBusy(true);
-    let failed = 0;
-    for (const id of selected) {
-      try { await saveItemAIPrompt(accountId, id, prompt); } catch { failed += 1; }
-    }
-    setBusy(false);
-    notify(failed ? `保存完成，${failed} 个商品保存失败，请重试` : `已保存 ${selected.length} 个商品的提示词`, failed ? 'error' : 'success');
+    try {
+      await put(`${endpoint(accountId)}/${editing.id}`, { name: editing.name, prompt: editing.prompt, item_ids: editing.item_ids });
+      await reload(); setEditing(null); notify('提示词已保存', 'success');
+    } catch { notify('保存失败，请检查商品后重试', 'error'); }
+    finally { setBusy(false); }
+  };
+  const remove = async (group: PromptGroup) => {
+    if (!await confirmAction(`删除“${group.name}”？关联商品将不再使用这条提示词。`)) return;
+    setBusy(true);
+    try { await del(`${endpoint(accountId)}/${group.id}`); await reload(); notify('提示词已删除', 'success'); }
+    catch { notify('删除失败，请重试', 'error'); }
+    finally { setBusy(false); }
   };
   return <section className="section-panel p-5 space-y-3">
-    <h3 className="font-bold">商品 AI 提示词</h3>
-    <p className="text-sm text-gray-600">选择一个或多个商品并保存，将替换所选商品已有的专属提示词。留空可清除。</p>
-    <div className="max-h-56 overflow-auto space-y-1">{items.map(item => <label key={item.item_id} className="flex items-center gap-2 text-sm">
-      <input type="checkbox" checked={selected.includes(item.item_id)} onChange={event => setSelected(current => event.target.checked ? [...current, item.item_id] : current.filter(id => id !== item.item_id))} />
-      <span>{item.item_title || item.item_id}（{item.item_id}）</span></label>)}</div>
-    <textarea aria-label="商品专属 AI 提示词" className="ios-input min-h-28 w-full rounded-md p-3" maxLength={10000} disabled={loadingPrompt} value={prompt} onChange={event => setPrompt(event.target.value)} />
-    <button type="button" disabled={busy || loadingPrompt || promptError} onClick={() => void save()} className="ios-btn-primary rounded-md px-4 py-2 text-sm">{busy ? '保存中…' : '保存到所选商品'}</button>
+    <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-bold">商品 AI 提示词</h3><p className="mt-1 text-sm text-gray-600">一条提示词可关联多个商品，每个商品使用一条商品专属提示词。</p></div>
+      <button type="button" disabled={loading || busy || Boolean(error)} onClick={() => { setQuery(''); setEditing({id: 0, name: '', prompt: '', item_ids: []}); }} className="ios-btn-primary rounded-md px-4 py-2 text-sm">添加提示词</button></div>
+    {loading && <p className="text-sm text-gray-500">加载中…</p>}{error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+    {!loading && !error && !groups.length && <p className="text-sm text-gray-500">还没有提示词，点击“添加提示词”开始设置。</p>}
+    {groups.map(group => <div key={group.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-gray-200 p-3"><div className="min-w-0"><p className="font-semibold">{group.name}</p><p className="text-xs text-gray-500">关联 {group.item_ids.length} 个商品</p></div><div className="flex gap-2"><button type="button" className="ios-btn-secondary rounded px-3 py-1 text-sm" onClick={() => { setQuery(''); setEditing({...group, item_ids: [...group.item_ids]}); }}>编辑</button><button type="button" className="rounded px-3 py-1 text-sm text-red-600" disabled={busy} onClick={() => void remove(group)}>删除</button></div></div>)}
+    {editing && createPortal(<div className="modal-overlay"><div className="modal-container"><div className="modal-header"><h3 className="font-bold">{editing.id ? '编辑提示词' : '添加提示词'}</h3></div><div className="modal-body space-y-3">
+      <label className="block text-sm font-semibold">提示词名称<input className="ios-input mt-1 w-full rounded p-2" maxLength={80} value={editing.name} onChange={event => setEditing({...editing, name: event.target.value})} placeholder="例如：软件售后" /></label>
+      <label className="block text-sm font-semibold">提示词内容<textarea className="ios-input mt-1 min-h-32 w-full rounded p-2" maxLength={10000} value={editing.prompt} onChange={event => setEditing({...editing, prompt: event.target.value})} placeholder="填写这些商品共用的 AI 回复规则" /></label>
+      <div><p className="text-sm font-semibold">选择商品（已选 {editing.item_ids.length} 个）</p><p className="text-xs text-gray-500">选择已绑定其他提示词的商品时，会将它改为使用当前提示词。</p><input aria-label="搜索商品" className="ios-input my-2 w-full rounded p-2" placeholder="搜索商品名称或 ID" value={query} onChange={event => setQuery(event.target.value)} />
+        <div className="max-h-48 space-y-1 overflow-auto">{filtered.map(item => { const other = groups.find(group => group.id !== editing.id && group.item_ids.includes(item.item_id)); return <label key={item.item_id} className="flex items-center gap-2 rounded px-2 py-1 text-sm hover:bg-gray-50"><input type="checkbox" checked={editing.item_ids.includes(item.item_id)} onChange={event => setEditing({...editing, item_ids: event.target.checked ? [...editing.item_ids, item.item_id] : editing.item_ids.filter(id => id !== item.item_id)})} /><span>{item.item_title || item.item_id}（{item.item_id}）{other && <span className="text-gray-400"> · 当前：{other.name}</span>}</span></label>; })}{!filtered.length && <p className="text-sm text-gray-500">没有找到商品</p>}</div></div>
+      </div><div className="modal-footer flex justify-end gap-2"><button type="button" disabled={busy} onClick={() => setEditing(null)} className="ios-btn-secondary rounded px-4 py-2">取消</button><button type="button" disabled={busy} onClick={() => void save()} className="ios-btn-primary rounded px-4 py-2">{busy ? '保存中…' : '保存提示词'}</button></div></div></div>, document.body)}
   </section>;
 }

@@ -1103,6 +1103,28 @@ class DBManager:
                     FOREIGN KEY (cookie_id) REFERENCES cookies(id) ON DELETE CASCADE
                 )
             ''')
+            cursor.execute("""CREATE TABLE IF NOT EXISTS ai_prompt_groups (
+                id INTEGER NOT NULL, cookie_id TEXT NOT NULL,
+                name TEXT NOT NULL, prompt TEXT NOT NULL, PRIMARY KEY(cookie_id, id)
+            )""")
+            cursor.execute("""CREATE TABLE IF NOT EXISTS ai_prompt_group_items (
+                cookie_id TEXT NOT NULL, item_id TEXT NOT NULL, group_id INTEGER NOT NULL,
+                PRIMARY KEY(cookie_id, item_id)
+            )""")
+            cursor.execute("""CREATE TRIGGER IF NOT EXISTS delete_ai_group_item_with_product
+                AFTER DELETE ON item_info BEGIN
+                    DELETE FROM ai_prompt_group_items WHERE cookie_id=OLD.cookie_id AND item_id=OLD.item_id;
+                END""")
+            cursor.execute("""CREATE TRIGGER IF NOT EXISTS delete_ai_groups_with_cookie
+                AFTER DELETE ON cookies BEGIN
+                    DELETE FROM ai_prompt_group_items WHERE cookie_id = OLD.id;
+                    DELETE FROM ai_prompt_groups WHERE cookie_id = OLD.id;
+                END""")
+            cursor.execute("""CREATE TRIGGER IF NOT EXISTS revoke_ai_groups_on_owner_change
+                AFTER UPDATE OF user_id ON cookies WHEN NEW.user_id != OLD.user_id BEGIN
+                    DELETE FROM ai_prompt_group_items WHERE cookie_id = OLD.id;
+                    DELETE FROM ai_prompt_groups WHERE cookie_id = OLD.id;
+                END""")
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS ai_reply_images (
                     cookie_id TEXT PRIMARY KEY,
@@ -2883,6 +2905,11 @@ class DBManager:
     # -------------------- AI回复设置操作 --------------------
     def get_item_ai_prompt(self, cookie_id: str, item_id: str) -> str:
         with self.lock:
+            row = self.conn.execute('''SELECT g.prompt FROM ai_prompt_group_items i
+                JOIN ai_prompt_groups g ON g.id=i.group_id AND g.cookie_id=i.cookie_id
+                WHERE i.cookie_id=? AND i.item_id=?''', (cookie_id, item_id)).fetchone()
+            if row:
+                return row[0]
             row = self.conn.execute(
                 'SELECT prompt FROM item_ai_prompts WHERE cookie_id = ? AND item_id = ?',
                 (cookie_id, item_id),
@@ -2891,6 +2918,7 @@ class DBManager:
 
     def save_item_ai_prompt(self, cookie_id: str, item_id: str, prompt: str):
         with self.lock:
+            self.conn.execute('DELETE FROM ai_prompt_group_items WHERE cookie_id=? AND item_id=?', (cookie_id, item_id))
             self.conn.execute('''
                 INSERT INTO item_ai_prompts (cookie_id, item_id, prompt) VALUES (?, ?, ?)
                 ON CONFLICT(cookie_id, item_id) DO UPDATE SET prompt = excluded.prompt
@@ -3960,7 +3988,7 @@ class DBManager:
 
                         # 备份其他相关表
                         related_tables = ['cookie_status', 'default_replies', 'message_notifications',
-                                        'item_info', 'ai_reply_settings', 'ai_conversations', 'item_ai_prompts', 'ai_reply_images']
+                                        'item_info', 'ai_reply_settings', 'ai_conversations', 'item_ai_prompts', 'ai_prompt_groups', 'ai_prompt_group_items', 'ai_reply_images']
 
                         for table in related_tables:
                             cursor.execute(f"SELECT * FROM {table} WHERE cookie_id IN ({placeholders})", user_cookie_ids)
@@ -3976,7 +4004,7 @@ class DBManager:
                         'cookies', 'keywords', 'cookie_status', 'cards',
                         'delivery_rules', 'default_replies', 'notification_channels',
                         'message_notifications', 'system_settings', 'item_info',
-                        'ai_reply_settings', 'ai_conversations', 'ai_item_cache', 'item_ai_prompts', 'ai_reply_images'
+                        'ai_reply_settings', 'ai_conversations', 'ai_item_cache', 'item_ai_prompts', 'ai_prompt_groups', 'ai_prompt_group_items', 'ai_reply_images'
                     ]
 
                     for table in tables:
@@ -4019,7 +4047,7 @@ class DBManager:
 
                         # 删除用户相关数据
                         related_tables = ['message_notifications', 'default_replies', 'item_info',
-                                        'cookie_status', 'keywords', 'ai_conversations', 'ai_reply_settings', 'item_ai_prompts', 'ai_reply_images']
+                                        'cookie_status', 'keywords', 'ai_conversations', 'ai_reply_settings', 'item_ai_prompts', 'ai_prompt_groups', 'ai_prompt_group_items', 'ai_reply_images']
 
                         for table in related_tables:
                             cursor.execute(f"DELETE FROM {table} WHERE cookie_id IN ({placeholders})", user_cookie_ids)
@@ -4031,7 +4059,7 @@ class DBManager:
                     tables = [
                         'message_notifications', 'notification_channels', 'default_replies',
                         'delivery_rules', 'cards', 'item_info', 'cookie_status', 'keywords',
-                        'ai_conversations', 'ai_reply_settings', 'ai_item_cache', 'item_ai_prompts', 'ai_reply_images', 'cookies'
+                        'ai_conversations', 'ai_reply_settings', 'ai_item_cache', 'item_ai_prompts', 'ai_prompt_groups', 'ai_prompt_group_items', 'ai_reply_images', 'cookies'
                     ]
 
                     for table in tables:
@@ -4046,7 +4074,7 @@ class DBManager:
                     if table_name not in ['cookies', 'keywords', 'cookie_status', 'cards',
                                         'delivery_rules', 'default_replies', 'notification_channels',
                                         'message_notifications', 'system_settings', 'item_info',
-                                        'ai_reply_settings', 'ai_conversations', 'ai_item_cache', 'item_ai_prompts', 'ai_reply_images']:
+                                        'ai_reply_settings', 'ai_conversations', 'ai_item_cache', 'item_ai_prompts', 'ai_prompt_groups', 'ai_prompt_group_items', 'ai_reply_images']:
                         continue
 
                     columns = table_data['columns']
