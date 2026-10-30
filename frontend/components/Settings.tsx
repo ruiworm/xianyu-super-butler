@@ -626,9 +626,9 @@ const Settings: React.FC = () => {
 
             <label>
               <span className="field-label">思考等级</span>
-              <select value={settings.ai_reasoning_effort || 'default'} onChange={event => setSettings({ ...settings, ai_reasoning_effort: event.target.value })} className="ios-input w-full rounded-md px-3 py-2.5">
+              <select value={settings.ai_reasoning_effort || 'default'} onChange={event => setSettings({ ...settings, ai_reasoning_effort: event.target.value })} disabled={(settings.ai_model || '').toLowerCase().includes('gemini') || ((settings.ai_api_url || '').includes('/apps/') && ['custom', '自定义', 'dashscope', 'qwen-custom'].includes((settings.ai_model || '').toLowerCase()))} className="ios-input w-full rounded-md px-3 py-2.5 disabled:opacity-50">
                 <option value="default">模型默认</option><option value="off">关闭思考</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option>
-              </select><span className="mt-1 block text-xs text-gray-500">需接口和模型支持；不支持时请选模型默认。</span>
+              </select><span className="mt-1 block text-xs text-gray-500">{(settings.ai_model || '').toLowerCase().includes('gemini') || ((settings.ai_api_url || '').includes('/apps/') && ['custom', '自定义', 'dashscope', 'qwen-custom'].includes((settings.ai_model || '').toLowerCase())) ? '当前原生 Gemini 或 DashScope 应用接口不使用此设置。' : (settings.ai_model || '').toLowerCase().includes('qwen') ? '使用通义兼容接口的 enable_thinking / thinking_budget，需服务商支持。' : '向 OpenAI 兼容接口发送 reasoning_effort；模型或服务商不支持时，请选择模型默认。'}</span>
             </label>
             <label>
               <span className="field-label">默认模型</span>

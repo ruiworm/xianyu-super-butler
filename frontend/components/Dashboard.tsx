@@ -61,6 +61,11 @@ const Dashboard: React.FC = () => {
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  useEffect(() => {
+    const refresh = () => setReloadToken(value => value + 1);
+    window.addEventListener('settlement-rules-changed', refresh);
+    return () => window.removeEventListener('settlement-rules-changed', refresh);
+  }, []);
 
   // 搜索词
   const [searchTerm, setSearchTerm] = useState('');
@@ -494,6 +499,20 @@ const Dashboard: React.FC = () => {
           icon={DollarSign}
           colorClass="bg-[#ffe100]"
           description="待发货、已发货和已完成的订单；不等同于已到账金额。"
+        />
+        <StatCard
+          title="预估到手（当前时间范围）"
+          value={`¥${(analytics.revenue_stats.estimated_settlement ?? 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          icon={DollarSign}
+          colorClass="bg-[#f5c800]"
+          description={`按商品当前设置估算，${analytics.revenue_stats.estimated_settlement_orders ?? 0} 单已估算，${analytics.revenue_stats.unconfigured_settlement_orders ?? 0} 单未计入；不代表实际到账。`}
+        />
+        <StatCard
+          title="累计预估到手（全部时间）"
+          value={lifetimeAnalytics ? `¥${(lifetimeAnalytics.revenue_stats.estimated_settlement ?? 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+          icon={DollarSign}
+          colorClass="bg-[#f5c800]"
+          description={`按商品当前设置估算，${lifetimeAnalytics?.revenue_stats.unconfigured_settlement_orders ?? 0} 单未计入；历史金额会随设置变化。`}
         />
         <StatCard
           title="有效成交额 (CNY)"

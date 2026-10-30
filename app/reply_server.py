@@ -42,6 +42,8 @@ from app.routers.logistics_agent import create_logistics_agent_router
 from app.desktop_bridge import create_desktop_bridge_router
 from app.desktop_bridge_package import create_desktop_bridge_download_router
 from app.ai_reply_images import create_ai_reply_images_router
+from app.ai_knowledge import create_knowledge_router
+from app.item_settlement import create_settlement_router
 from utils.qr_login import qr_login_manager
 from utils.xianyu_utils import trans_cookies
 from utils.image_utils import image_manager
@@ -384,6 +386,8 @@ app.include_router(create_logistics_agent_router(get_current_user, db_manager))
 logger.info("已注册物流 Agent 路由")
 app.include_router(create_desktop_bridge_download_router())
 app.include_router(create_ai_reply_images_router(get_current_user, db_manager))
+app.include_router(create_knowledge_router(get_current_user, db_manager))
+app.include_router(create_settlement_router(get_current_user, db_manager))
 
 # 初始化文件日志收集器
 setup_file_logging()
@@ -5761,6 +5765,16 @@ def reload_cache(_: Dict[str, Any] = Depends(require_admin)):
 
 # ==================== 商品管理 API ====================
 
+@app.get('/delayed-delivery-jobs')
+def get_delayed_delivery_jobs(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Only the owner's pending or uncertain tasks, without delivery contents."""
+    with db_manager.lock:
+        rows = db_manager.conn.execute('''SELECT j.cookie_id,j.order_id,j.item_id,j.due_at,j.state,j.updated_at
+            FROM delayed_delivery_jobs j JOIN cookies c ON c.id=j.cookie_id
+            WHERE c.user_id=? AND j.state IN ('waiting','processing','review')
+            ORDER BY j.updated_at DESC LIMIT 100''', (current_user['user_id'],)).fetchall()
+    return {'jobs': [dict(zip(('cookie_id','order_id','item_id','due_at','state','updated_at'), row)) for row in rows]}
+
 @app.get("/items")
 def get_all_items(current_user: Dict[str, Any] = Depends(get_current_user)):
     """获取当前用户的所有商品信息"""
@@ -9148,9 +9162,9 @@ async def import_orders(
 
 # 定义后端 API 的一级路径。未匹配的 API 路径必须返回 JSON 404，不能回退到 SPA。
 API_ROOTS = {
-    'admin', 'ai-reply-settings', 'ai-reply-test', 'analytics', 'api', 'backup',
+    'admin', 'ai-reply-settings', 'ai-reply-test', 'ai-knowledge', 'item-settlement', 'analytics', 'api', 'backup',
     'cards', 'change-admin-password', 'change-password', 'cookie', 'cookies',
-    'blacklist', 'debug', 'default-replies', 'delivery-block-rules', 'delivery-rules', 'face-verification',
+    'blacklist', 'debug', 'default-replies', 'delayed-delivery-jobs', 'delivery-block-rules', 'delivery-rules', 'face-verification',
     'generate-captcha', 'geetest', 'health', 'item-reply', 'itemReplays', 'items',
     'item-delivery-configs',
     'keywords', 'keywords-export', 'keywords-import', 'keywords-with-item-id',

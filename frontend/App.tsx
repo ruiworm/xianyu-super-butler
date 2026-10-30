@@ -15,7 +15,6 @@ const ItemList = lazy(() => import('./components/ItemList'));
 const ProductAutomation = lazy(() => import('./components/ProductAutomation'));
 const AIReply = lazy(() => import('./components/AIReply'));
 const Settings = lazy(() => import('./components/Settings'));
-const Keywords = lazy(() => import('./components/Keywords'));
 const MessageManagement = lazy(() => import('./components/MessageManagement'));
 const NotificationsAndLogs = lazy(() => import('./components/NotificationsAndLogs'));
 const UserManagement = lazy(() => import('./components/UserManagement'));
@@ -36,7 +35,6 @@ const pageLabels: Record<string, string> = {
   'buyer-interaction': '买家互动',
   cards: '卡密库存',
   messages: '消息中心',
-  'auto-reply': '自动回复',
   'ai-reply': 'AI 回复',
   'product-automation': '商品自动化',
   notifications: '通知与日志',
@@ -49,7 +47,7 @@ const ADMIN_ONLY_TABS = ['settings', 'users'];
 
 const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [activeTab, setActiveTab] = useState(() => { const page = localStorage.getItem('active_page'); return !page || page === 'about' ? 'dashboard' : page; });
+  const [activeTab, setActiveTab] = useState(() => { const page = localStorage.getItem('active_page'); return page === 'auto-reply' ? 'ai-reply' : !page || page === 'about' ? 'dashboard' : page; });
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -583,9 +581,6 @@ const App: React.FC = () => {
           </section>
           <section hidden={activeTab !== 'cards'}>
             <Suspense fallback={activeTab === 'cards' ? <PageLoader /> : null}><CardList /></Suspense>
-          </section>
-          <section hidden={activeTab !== 'auto-reply'}>
-            <Suspense fallback={activeTab === 'auto-reply' ? <PageLoader /> : null}><Keywords mode="reply" /></Suspense>
           </section>
           <section hidden={activeTab !== 'ai-reply'}>
             <Suspense fallback={activeTab === 'ai-reply' ? <PageLoader /> : null}><AIReply /></Suspense>

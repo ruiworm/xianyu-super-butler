@@ -5,6 +5,7 @@ import { getOrders, syncOrders, syncSingleOrder, manualShipOrder, updateOrder, d
 import { confirmAction, notify } from '../services/feedback';
 import { Search, Truck, RefreshCw, ChevronLeft, ChevronRight, PackageCheck, Edit, Eye, Plus, Save, X, ExternalLink, Trash2, ClipboardList, Flower2, Star } from 'lucide-react';
 import { EmptyState, PageHeader, PageTabs } from './ui';
+import DelayedDeliveryJobs from './DelayedDeliveryJobs';
 
 const StatusBadge: React.FC<{ status: OrderStatus }> = ({ status }) => {
   const styles = {
@@ -493,6 +494,8 @@ const OrderList: React.FC = () => {
           </>
         )}
       />
+
+      <DelayedDeliveryJobs />
 
       <div className="metric-grid metric-grid--compact">
         <div className="metric-card">

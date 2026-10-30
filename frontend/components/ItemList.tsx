@@ -43,6 +43,7 @@ import {
 import { confirmAction } from '../services/feedback';
 import DeliveryProtection from './DeliveryProtection';
 import CardDeliveryTemplateSettings from './CardDeliveryTemplateSettings';
+import ItemSettlementEditor from './ItemSettlementEditor';
 import GeneralDeliveryRules from './GeneralDeliveryRules';
 import {EmptyState, NoticeBanner, PageHeader, PageLoading, PageTabs} from './ui';
 
@@ -198,6 +199,7 @@ const ItemList: React.FC = () => {
   const [notice, setNotice] = useState<Notice>(null);
 
   const [detailItem, setDetailItem] = useState<Item | null>(null);
+  const [settlementItem, setSettlementItem] = useState<Item | null>(null);
   const [itemDetail, setItemDetail] = useState('');
   const [deliveryItem, setDeliveryItem] = useState<Item | null>(null);
   const [deliveryLoading, setDeliveryLoading] = useState(false);
@@ -951,6 +953,7 @@ const ItemList: React.FC = () => {
 
                       <div className="flex items-center justify-end gap-1 border-t border-gray-100 pt-3 xl:!flex-row xl:items-center xl:justify-end xl:border-0 xl:pt-0">
                         <div className="flex flex-wrap items-center justify-end gap-1">
+                          <button type="button" onClick={() => setSettlementItem(item)} disabled={busy} className="rounded-md bg-amber-50 px-2 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100" aria-label={`到手设置 ${item.item_title || item.item_id}`}>到手设置</button>
                           <button
                             type="button"
                             onClick={() => openDetail(item)}
@@ -1279,6 +1282,7 @@ const ItemList: React.FC = () => {
         document.body,
       )}
 
+      {settlementItem && <ItemSettlementEditor item={settlementItem} onClose={() => setSettlementItem(null)} />}
       {detailItem && createPortal(
         <div className="modal-overlay">
           <div className="modal-container">

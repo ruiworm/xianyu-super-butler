@@ -173,7 +173,7 @@ const AIReply: React.FC = () => {
         />
       ) : (
         <>
-          <div key={selectedAccountId} className="space-y-4"><AIProductPrompts accountId={selectedAccountId} /><AIReplyImages accountId={selectedAccountId} /><Keywords mode="reply" accountId={selectedAccountId} /></div>
+          <div key={selectedAccountId} className="space-y-4"><AIProductPrompts accountId={selectedAccountId} /><AIProductPrompts accountId={selectedAccountId} knowledge /><AIReplyImages accountId={selectedAccountId} /><Keywords mode="reply" accountId={selectedAccountId} /></div>
           <section className="section-panel grid gap-4 p-4 lg:grid-cols-[1fr_auto] lg:items-center">
             <div>
               <div className="flex items-center gap-2 font-bold text-gray-900">

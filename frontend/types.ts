@@ -518,6 +518,9 @@ export interface AdminUser {
 export interface OrderAnalytics {
   revenue_stats: {
     total_amount: number;
+    estimated_settlement?: number;
+    estimated_settlement_orders?: number;
+    unconfigured_settlement_orders?: number;
     total_orders: number;
     avg_amount?: number;
     unique_buyers?: number;

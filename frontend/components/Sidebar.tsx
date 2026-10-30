@@ -7,7 +7,6 @@ import {
   LayoutDashboard,
   ListFilter,
   LogOut,
-  MessageSquare,
   Settings,
   ShoppingBag,
   Star,
@@ -32,7 +31,10 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onLogout, mo
   const [expanded, setExpanded] = useState(false);
   const [editingFavorites, setEditingFavorites] = useState(false);
   const [favorites, setFavorites] = useState<string[]>(() => {
-    try { const value = JSON.parse(localStorage.getItem('sidebar_favorites') || '[]'); return Array.isArray(value) ? value : []; } catch { return []; }
+    try {
+      const value = JSON.parse(localStorage.getItem('sidebar_favorites') || '[]');
+      return Array.isArray(value) ? [...new Set<string>(value.filter((id): id is string => typeof id === 'string').map(id => id === 'auto-reply' ? 'ai-reply' : id))] : [];
+    } catch { return []; }
   });
   const toggleFavorite = (id: string) => setFavorites(current => {
     const next = current.includes(id) ? current.filter(value => value !== id) : [...current, id];
@@ -64,7 +66,6 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onLogout, mo
       label: '客户沟通',
       items: [
         { id: 'messages', icon: ListFilter, label: '消息中心' },
-        { id: 'auto-reply', icon: MessageSquare, label: '自动回复' },
         { id: 'ai-reply', icon: Bot, label: 'AI 回复' },
       ],
     },

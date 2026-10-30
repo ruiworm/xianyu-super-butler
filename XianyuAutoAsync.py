@@ -949,6 +949,36 @@ class XianyuLive:
         task.add_done_callback(self.background_tasks.discard)
         return task
 
+    async def _recover_delayed_deliveries(self, websocket):
+        """连接恢复后处理到期的等待任务；处理中断的任务只交由人工核对。"""
+        from app.db_manager import db_manager
+        from app.delayed_delivery import DelayedDeliveryStore
+        store = DelayedDeliveryStore(db_manager)
+        while getattr(self, 'ws', None) is websocket:
+            try:
+                for job in store.due_jobs(self.cookie_id):
+                    if getattr(self, 'ws', None) is not websocket:
+                        break
+                    current = db_manager.get_order_by_id(job['order_id'])
+                    if current and current.get('system_shipped'):
+                        store.transition(self.cookie_id, job['order_id'], 'waiting', 'completed')
+                        continue
+                    fresh = await self.fetch_order_detail_info(job['order_id'], job['item_id'], job['buyer_id'])
+                    status = fresh.get('order_status') if isinstance(fresh, dict) else None
+                    if not status or status == 'unknown':
+                        continue
+                    if status != 'pending_ship':
+                        if status in {'cancelled', 'refunding', 'shipped', 'completed'}:
+                            store.transition(self.cookie_id, job['order_id'], 'waiting', 'cancelled')
+                        continue
+                    await self._handle_auto_delivery(websocket, {}, job['buyer_name'], job['buyer_id'],
+                        job['item_id'], job['chat_id'], '延时任务恢复', recovery_order_id=job['order_id'])
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.error(f"【{self.cookie_id}】恢复延时发货失败: {type(exc).__name__}")
+            await asyncio.sleep(30)
+
     def is_auto_confirm_enabled(self) -> bool:
         """检查当前账号是否启用自动确认发货"""
         try:
@@ -1717,8 +1747,10 @@ class XianyuLive:
         return result
 
     async def _handle_auto_delivery(self, websocket, message: dict, send_user_name: str, send_user_id: str,
-                                   item_id: str, chat_id: str, msg_time: str):
+                                   item_id: str, chat_id: str, msg_time: str, *, recovery_order_id: str = None):
         """统一处理自动发货逻辑"""
+        delivery_context = None
+        order_id = None
         try:
             # 检查商品是否属于当前cookies
             if item_id and item_id != "未知商品":
@@ -1734,7 +1766,7 @@ class XianyuLive:
                     return
 
             # 提取订单ID
-            order_id = self._extract_order_id(message)
+            order_id = recovery_order_id or self._extract_order_id(message)
 
             # 如果order_id不存在，直接返回
             if not order_id:
@@ -1745,6 +1777,9 @@ class XianyuLive:
             from app.db_manager import db_manager
             current_order = db_manager.get_order_by_id(order_id)
             if current_order:
+                if current_order.get('system_shipped'):
+                    logger.info(f'【{self.cookie_id}】订单 {order_id} 已记录发货，跳过重复处理')
+                    return
                 if str(current_order.get('cookie_id') or '') != str(self.cookie_id):
                     logger.error(f'[{msg_time}] 【{self.cookie_id}】订单 {order_id} 不属于当前账号，拒绝自动发货')
                     return
@@ -1866,7 +1901,7 @@ class XianyuLive:
 
                     # 先解析一次商品规格与库存绑定，再按订单数量和每件发货份数取内容。
                     delivery_contents = []
-                    delivery_context = {}
+                    delivery_context = {'_delay_meta': {'buyer_name': send_user_name, 'chat_id': chat_id}}
 
                     try:
                         first_content = await self._auto_delivery(
@@ -1920,6 +1955,7 @@ class XianyuLive:
                             logger.error(f"第 {i+1}/{quantity_to_send} 个卡券获取异常: {self._safe_str(e)}")
 
                     if delivery_contents:
+                        websocket = getattr(self, 'ws', None) or websocket
                         # 标记锁为持有状态，并启动延迟释放任务
                         self._lock_hold_info[lock_key] = {
                             'locked': True,
@@ -1986,6 +2022,9 @@ class XianyuLive:
                         sent_all = sent_count == len(delivery_contents)
 
                         if acquired_all and sent_all:
+                            if delivery_context.get('_delay_claimed'):
+                                from app.delayed_delivery import DelayedDeliveryStore
+                                DelayedDeliveryStore(db_manager).transition(self.cookie_id, order_id, 'processing', 'completed')
                             confirm_required = self.is_auto_confirm_enabled() and not card_only_delivery
                             platform_confirmed = False
                             confirm_error = None
@@ -2065,6 +2104,15 @@ class XianyuLive:
 
         except Exception as e:
             logger.error(f"统一自动发货处理异常: {self._safe_str(e)}")
+        finally:
+            if order_id and delivery_context and delivery_context.get('_delay_claimed'):
+                try:
+                    from app.db_manager import db_manager
+                    from app.delayed_delivery import DelayedDeliveryStore
+                    if DelayedDeliveryStore(db_manager).transition(self.cookie_id, order_id, 'processing', 'review'):
+                        logger.warning(f'【{self.cookie_id}】订单 {order_id} 延时发货未完整结束，需人工核对后处理')
+                except Exception as exc:
+                    logger.error(f'【{self.cookie_id}】记录延时发货状态失败: {type(exc).__name__}')
 
 
 
@@ -6210,11 +6258,41 @@ class XianyuLive:
             # 获取延时设置
             delay_seconds = rule.get('card_delay_seconds', 0)
 
-            # 执行延时（不管是否确认发货，只要有延时设置就执行）
-            if delay_seconds and delay_seconds > 0:
-                logger.info(f"检测到发货延时设置: {delay_seconds}秒，开始延时...")
+            # 只在整单第一次取库存之前等待。等待记录持久化，避免重启后丢失。
+            delay_meta = delivery_context.get('_delay_meta') if delivery_context is not None else None
+            if delay_meta and order_id and not delivery_context.get('_delay_claimed'):
+                from app.delayed_delivery import DelayedDeliveryStore
+                store = DelayedDeliveryStore(db_manager)
+                existing_job = store.get(self.cookie_id, order_id)
+                if existing_job or (delay_seconds and delay_seconds > 0):
+                    job = store.schedule(self.cookie_id, order_id, item_id, send_user_id,
+                                         delay_meta['buyer_name'], delay_meta['chat_id'], delay_seconds or 0)
+                    if job['state'] != 'waiting':
+                        logger.warning(f"【{self.cookie_id}】订单 {order_id} 延时任务状态为 {job['state']}，不重复发货")
+                        return None
+                    await asyncio.sleep(max(0, job['due_at'] - time.time()))
+                    if not getattr(self, 'ws', None):
+                        logger.warning(f"【{self.cookie_id}】连接已断开，订单 {order_id} 保留等待恢复")
+                        return None
+                    # 延时期间订单可能取消或退款，重新向平台确认，不能只依赖旧缓存。
+                    fresh = await self.fetch_order_detail_info(order_id, item_id, send_user_id)
+                    status = fresh.get('order_status') if isinstance(fresh, dict) else None
+                    if not status or status == 'unknown':
+                        logger.warning(f"【{self.cookie_id}】无法确认订单 {order_id} 当前状态，保留任务等待重试")
+                        return None
+                    if status != 'pending_ship':
+                        if status in {'cancelled', 'refunding', 'shipped', 'completed'}:
+                            store.transition(self.cookie_id, order_id, 'waiting', 'cancelled')
+                            logger.warning(f"【{self.cookie_id}】订单 {order_id} 已结束待发货，取消延时任务")
+                        else:
+                            logger.warning(f"【{self.cookie_id}】订单 {order_id} 状态暂不能确认，保留任务等待重试")
+                        return None
+                    if not store.claim(self.cookie_id, order_id):
+                        return None
+                    delivery_context['_delay_claimed'] = True
+            elif not delay_meta and delay_seconds and delay_seconds > 0:
+                # 保留直接调用此方法的旧行为。
                 await asyncio.sleep(delay_seconds)
-                logger.info(f"延时完成")
 
             # 检查是否存在订单ID，只有存在订单ID才处理发货内容
             if order_id:
@@ -10362,6 +10440,7 @@ class XianyuLive:
 
                             # 初始化完成后才设置为已连接状态
                             self._set_connection_state(ConnectionState.CONNECTED, "初始化完成，连接就绪")
+                            self._create_tracked_task(self._recover_delayed_deliveries(websocket))
                             self.connection_failures = 0
                             self.last_successful_connection = time.time()
 

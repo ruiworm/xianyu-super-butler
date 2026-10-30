@@ -695,6 +695,38 @@ class DBManager:
             )
             ''')
 
+            cursor.execute("""CREATE TABLE IF NOT EXISTS item_settlement_rules (
+                cookie_id TEXT NOT NULL, item_id TEXT NOT NULL, mode TEXT NOT NULL,
+                fixed_unit TEXT, coin_rate TEXT NOT NULL DEFAULT '0',
+                worry_rate TEXT NOT NULL DEFAULT '0', fee_order TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY(cookie_id, item_id)
+            )""")
+            cursor.execute("""CREATE TRIGGER IF NOT EXISTS delete_item_settlement_with_product
+                AFTER DELETE ON item_info BEGIN
+                    DELETE FROM item_settlement_rules WHERE cookie_id=OLD.cookie_id AND item_id=OLD.item_id;
+                END""")
+            cursor.execute("""CREATE TRIGGER IF NOT EXISTS delete_item_settlement_with_cookie
+                AFTER DELETE ON cookies BEGIN
+                    DELETE FROM item_settlement_rules WHERE cookie_id=OLD.id;
+                END""")
+            cursor.execute("""CREATE TRIGGER IF NOT EXISTS revoke_item_settlement_on_owner_change
+                AFTER UPDATE OF user_id ON cookies WHEN NEW.user_id != OLD.user_id BEGIN
+                    DELETE FROM item_settlement_rules WHERE cookie_id=OLD.id;
+                END""")
+
+            cursor.execute("""CREATE TABLE IF NOT EXISTS delayed_delivery_jobs (
+                cookie_id TEXT NOT NULL, order_id TEXT NOT NULL, item_id TEXT NOT NULL,
+                buyer_id TEXT NOT NULL, buyer_name TEXT NOT NULL DEFAULT '', chat_id TEXT NOT NULL,
+                due_at REAL NOT NULL, state TEXT NOT NULL, updated_at REAL NOT NULL,
+                PRIMARY KEY(cookie_id, order_id)
+            )""")
+            cursor.execute("""CREATE TRIGGER IF NOT EXISTS delete_delayed_delivery_with_cookie
+                AFTER DELETE ON cookies BEGIN DELETE FROM delayed_delivery_jobs WHERE cookie_id=OLD.id; END""")
+            cursor.execute("""CREATE TRIGGER IF NOT EXISTS revoke_delayed_delivery_on_owner_change
+                AFTER UPDATE OF user_id ON cookies WHEN NEW.user_id != OLD.user_id BEGIN
+                    DELETE FROM delayed_delivery_jobs WHERE cookie_id=OLD.id;
+                END""")
+
             # 检查并添加 multi_quantity_delivery 列（用于多数量发货功能）
             try:
                 self._execute_sql(cursor, "SELECT multi_quantity_delivery FROM item_info LIMIT 1")
@@ -1103,6 +1135,28 @@ class DBManager:
                     FOREIGN KEY (cookie_id) REFERENCES cookies(id) ON DELETE CASCADE
                 )
             ''')
+            cursor.execute("""CREATE TABLE IF NOT EXISTS ai_knowledge_bases (
+                id INTEGER NOT NULL, cookie_id TEXT NOT NULL, name TEXT NOT NULL,
+                content TEXT NOT NULL, PRIMARY KEY(cookie_id, id)
+            )""")
+            cursor.execute("""CREATE TABLE IF NOT EXISTS ai_knowledge_items (
+                cookie_id TEXT NOT NULL, item_id TEXT NOT NULL, knowledge_id INTEGER NOT NULL,
+                PRIMARY KEY(cookie_id, item_id)
+            )""")
+            cursor.execute("""CREATE TRIGGER IF NOT EXISTS delete_ai_knowledge_with_cookie
+                AFTER DELETE ON cookies BEGIN
+                    DELETE FROM ai_knowledge_items WHERE cookie_id = OLD.id;
+                    DELETE FROM ai_knowledge_bases WHERE cookie_id = OLD.id;
+                END""")
+            cursor.execute("""CREATE TRIGGER IF NOT EXISTS revoke_ai_knowledge_on_owner_change
+                AFTER UPDATE OF user_id ON cookies WHEN NEW.user_id != OLD.user_id BEGIN
+                    DELETE FROM ai_knowledge_items WHERE cookie_id = OLD.id;
+                    DELETE FROM ai_knowledge_bases WHERE cookie_id = OLD.id;
+                END""")
+            cursor.execute("""CREATE TRIGGER IF NOT EXISTS delete_ai_knowledge_item_with_product
+                AFTER DELETE ON item_info BEGIN
+                    DELETE FROM ai_knowledge_items WHERE cookie_id=OLD.cookie_id AND item_id=OLD.item_id;
+                END""")
             cursor.execute("""CREATE TABLE IF NOT EXISTS ai_prompt_groups (
                 id INTEGER NOT NULL, cookie_id TEXT NOT NULL,
                 name TEXT NOT NULL, prompt TEXT NOT NULL, PRIMARY KEY(cookie_id, id)
@@ -3988,7 +4042,7 @@ class DBManager:
 
                         # 备份其他相关表
                         related_tables = ['cookie_status', 'default_replies', 'message_notifications',
-                                        'item_info', 'ai_reply_settings', 'ai_conversations', 'item_ai_prompts', 'ai_prompt_groups', 'ai_prompt_group_items', 'ai_reply_images']
+                                        'item_info', 'ai_reply_settings', 'ai_conversations', 'item_ai_prompts', 'ai_prompt_groups', 'ai_prompt_group_items', 'ai_knowledge_bases', 'ai_knowledge_items', 'item_settlement_rules', 'delayed_delivery_jobs', 'ai_reply_images']
 
                         for table in related_tables:
                             cursor.execute(f"SELECT * FROM {table} WHERE cookie_id IN ({placeholders})", user_cookie_ids)
@@ -4004,7 +4058,7 @@ class DBManager:
                         'cookies', 'keywords', 'cookie_status', 'cards',
                         'delivery_rules', 'default_replies', 'notification_channels',
                         'message_notifications', 'system_settings', 'item_info',
-                        'ai_reply_settings', 'ai_conversations', 'ai_item_cache', 'item_ai_prompts', 'ai_prompt_groups', 'ai_prompt_group_items', 'ai_reply_images'
+                        'ai_reply_settings', 'ai_conversations', 'ai_item_cache', 'item_ai_prompts', 'ai_prompt_groups', 'ai_prompt_group_items', 'ai_knowledge_bases', 'ai_knowledge_items', 'item_settlement_rules', 'delayed_delivery_jobs', 'ai_reply_images'
                     ]
 
                     for table in tables:
@@ -4047,7 +4101,7 @@ class DBManager:
 
                         # 删除用户相关数据
                         related_tables = ['message_notifications', 'default_replies', 'item_info',
-                                        'cookie_status', 'keywords', 'ai_conversations', 'ai_reply_settings', 'item_ai_prompts', 'ai_prompt_groups', 'ai_prompt_group_items', 'ai_reply_images']
+                                        'cookie_status', 'keywords', 'ai_conversations', 'ai_reply_settings', 'item_ai_prompts', 'ai_prompt_groups', 'ai_prompt_group_items', 'ai_knowledge_bases', 'ai_knowledge_items', 'item_settlement_rules', 'delayed_delivery_jobs', 'ai_reply_images']
 
                         for table in related_tables:
                             cursor.execute(f"DELETE FROM {table} WHERE cookie_id IN ({placeholders})", user_cookie_ids)
@@ -4059,7 +4113,7 @@ class DBManager:
                     tables = [
                         'message_notifications', 'notification_channels', 'default_replies',
                         'delivery_rules', 'cards', 'item_info', 'cookie_status', 'keywords',
-                        'ai_conversations', 'ai_reply_settings', 'ai_item_cache', 'item_ai_prompts', 'ai_prompt_groups', 'ai_prompt_group_items', 'ai_reply_images', 'cookies'
+                        'ai_conversations', 'ai_reply_settings', 'ai_item_cache', 'item_ai_prompts', 'ai_prompt_groups', 'ai_prompt_group_items', 'ai_knowledge_bases', 'ai_knowledge_items', 'item_settlement_rules', 'delayed_delivery_jobs', 'ai_reply_images', 'cookies'
                     ]
 
                     for table in tables:
@@ -4074,7 +4128,7 @@ class DBManager:
                     if table_name not in ['cookies', 'keywords', 'cookie_status', 'cards',
                                         'delivery_rules', 'default_replies', 'notification_channels',
                                         'message_notifications', 'system_settings', 'item_info',
-                                        'ai_reply_settings', 'ai_conversations', 'ai_item_cache', 'item_ai_prompts', 'ai_prompt_groups', 'ai_prompt_group_items', 'ai_reply_images']:
+                                        'ai_reply_settings', 'ai_conversations', 'ai_item_cache', 'item_ai_prompts', 'ai_prompt_groups', 'ai_prompt_group_items', 'ai_knowledge_bases', 'ai_knowledge_items', 'item_settlement_rules', 'delayed_delivery_jobs', 'ai_reply_images']:
                         continue
 
                     columns = table_data['columns']
@@ -4092,6 +4146,14 @@ class DBManager:
                             row_dict['user_id'] = user_id
                             updated_rows.append([row_dict[col] for col in columns])
                         rows = updated_rows
+
+                    # 备份可能早于实际发货，恢复后不能自动重放旧的等待任务。
+                    if table_name == 'delayed_delivery_jobs' and 'state' in columns:
+                        state_index = columns.index('state')
+                        rows = [list(row) for row in rows]
+                        for row in rows:
+                            if row[state_index] in ('waiting', 'processing'):
+                                row[state_index] = 'review'
 
                     # 构建插入语句
                     placeholders = ','.join(['?' for _ in columns])
@@ -7383,7 +7445,7 @@ class DBManager:
                 # 先尝试查询包含version的订单
                 cursor.execute('''
                 SELECT order_id, item_id, buyer_id, spec_name, spec_value,
-                       quantity, amount, order_status, cookie_id, is_bargain, created_at, updated_at, version, chat_id
+                       quantity, amount, order_status, cookie_id, is_bargain, created_at, updated_at, version, chat_id, system_shipped
                 FROM orders WHERE order_id = ?
                 ''', (order_id,))
 
@@ -7405,7 +7467,8 @@ class DBManager:
                         'created_at': row[10],
                         'updated_at': row[11],
                         'version': row[12] if len(row) > 12 else 1,  # 默认版本为1
-                        'chat_id': row[13] if len(row) > 13 else ''
+                        'chat_id': row[13] if len(row) > 13 else '',
+                        'system_shipped': bool(row[14]) if len(row) > 14 else False
                     }
                 return None
 
@@ -8264,6 +8327,33 @@ class DBManager:
                 if all_row and revenue_stats:
                     revenue_stats['all_orders'] = all_row[0] or 0
                     revenue_stats['all_amount'] = round(all_row[1] or 0, 2)
+
+                # 使用商品当前设置做估算；不把估算称作平台实际到账。
+                from decimal import Decimal
+                from app.settlement_math import estimate_settlement
+                if user_id is None:
+                    rule_rows = cursor.execute('SELECT cookie_id,item_id,mode,fixed_unit,coin_rate,worry_rate,fee_order FROM item_settlement_rules').fetchall()
+                else:
+                    rule_rows = cursor.execute("""SELECT r.cookie_id,r.item_id,r.mode,r.fixed_unit,r.coin_rate,r.worry_rate,r.fee_order
+                        FROM item_settlement_rules r JOIN cookies c ON c.id=r.cookie_id WHERE c.user_id=?""", (user_id,)).fetchall()
+                rule_map = {(entry[0], entry[1]): entry[2:] for entry in rule_rows}
+                cursor.execute(f"""SELECT cookie_id,item_id,amount,buy_num FROM orders {where_clause}
+                    AND amount IS NOT NULL AND amount != '' AND amount != 'N/A'""", params)
+                estimated_total, estimated_count, missing_count = Decimal('0'), 0, 0
+                while True:
+                    batch = cursor.fetchmany(1000)
+                    if not batch:
+                        break
+                    for account, item, amount, quantity in batch:
+                        value = estimate_settlement(amount, quantity, rule_map.get((account, item)))
+                        if value is None:
+                            missing_count += 1
+                        else:
+                            estimated_total += value
+                            estimated_count += 1
+                revenue_stats['estimated_settlement'] = float(estimated_total)
+                revenue_stats['estimated_settlement_orders'] = estimated_count
+                revenue_stats['unconfigured_settlement_orders'] = missing_count
 
                 # 2. 按日期统计订单量和收益
                 # 覆盖全部订单，退款和已取消也要出现在趋势里，否则那几天会整天空白。
