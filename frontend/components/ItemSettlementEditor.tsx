@@ -5,7 +5,7 @@ import { Item } from '../types';
 import { confirmAction, notify } from '../services/feedback';
 
 type Rule = { configured?: boolean; mode: 'fixed' | 'percent'; fixed_unit: string; coin_rate: string; worry_rate: string; fee_order: '' | 'parallel' | 'sequential' };
-const initial: Rule = { mode: 'percent', fixed_unit: '', coin_rate: '', worry_rate: '0', fee_order: '' };
+const initial: Rule = { mode: 'percent', fixed_unit: '', coin_rate: '0', worry_rate: '0', fee_order: '' };
 
 export default function ItemSettlementEditor({item, onClose}: {item: Item; onClose: () => void}) {
   const [rule, setRule] = useState<Rule>(initial);
@@ -27,7 +27,7 @@ export default function ItemSettlementEditor({item, onClose}: {item: Item; onClo
     if (rule.mode === 'fixed' && (!rule.fixed_unit.trim() || !Number.isFinite(fixed) || fixed < 0 || fixed > 10000000)) { notify('请填写有效的每件到手金额', 'warning'); return; }
     if (rule.mode === 'percent' && (!rule.coin_rate.trim() || !Number.isFinite(coin) || coin < 0 || coin > 100 || !rule.worry_rate.trim() || !Number.isFinite(worry) || worry < 0 || worry > 100)) { notify('请选择分润比例，并填写 0 到 100 的无忧卖比例', 'warning'); return; }
     if (rule.mode === 'percent' && worry > 0 && !rule.fee_order) { notify('请选择无忧卖分润的计算方式', 'warning'); return; }
-    if (rule.mode === 'percent' && rule.fee_order === 'parallel' && coin + worry > 100) { notify('分别扣除的比例合计不能超过 100%', 'warning'); return; }
+    if (rule.mode === 'percent' && (rule.fee_order === 'sequential' ? (100 - coin) * (100 - worry) / 100 : 100 - coin - worry) < 1.6) { notify('分润和服务费合计不能超过订单金额', 'warning'); return; }
     setBusy(true);
     try {
       await put(url, {mode: rule.mode, fixed_unit: rule.mode === 'fixed' ? rule.fixed_unit : null,
@@ -55,8 +55,8 @@ export default function ItemSettlementEditor({item, onClose}: {item: Item; onClo
         <option value="percent">按订单金额和分润比例估算</option><option value="fixed">填写每件到手金额</option>
       </select></label>
       {rule.mode === 'fixed' ? <label className="block text-sm font-semibold">每件到手金额（元）<input type="number" min="0" step="0.01" value={rule.fixed_unit} onChange={e => setRule({...rule,fixed_unit:e.target.value})} className="ios-input mt-1 w-full rounded p-2" placeholder="例如 80" /></label> : <>
-        <label className="block text-sm font-semibold">闲鱼币分润比例<select value={rule.coin_rate} onChange={e => setRule({...rule,coin_rate:e.target.value})} className="ios-input mt-1 w-full rounded p-2"><option value="">请选择</option><option value="0">不扣</option><option value="5">5%</option><option value="20">20%</option><option value="30">30%</option></select></label>
-        <p className="text-xs text-gray-500">按你选择的比例固定计算，买家未使用闲鱼币时也会计算。</p>
+        <label className="block text-sm font-semibold">闲鱼币分润比例<select value={rule.coin_rate} onChange={e => setRule({...rule,coin_rate:e.target.value})} className="ios-input mt-1 w-full rounded p-2"><option value="">请选择</option><option value="0">不选择闲鱼币分润（0%）</option><option value="5">5%</option><option value="20">20%</option><option value="30">30%</option></select></label>
+        <p className="text-xs text-gray-500">按你选择的比例固定计算，买家未使用闲鱼币时也会计算。</p><p className="text-xs text-gray-500">另按订单成交金额固定扣除 1.6% 服务费；填写每件到手金额时不再重复扣费。</p>
         <label className="block text-sm font-semibold">无忧卖分润比例（%）<input type="number" min="0" max="100" step="0.01" value={rule.worry_rate} onChange={e => setRule({...rule,worry_rate:e.target.value})} className="ios-input mt-1 w-full rounded p-2" /></label>
         <p className="text-xs text-gray-500">由你按实际合同填写；不使用无忧卖请填 0。</p>
         {Number(rule.worry_rate) > 0 && <label className="block text-sm font-semibold">无忧卖费用怎么计算<select value={rule.fee_order} onChange={e => setRule({...rule,fee_order:e.target.value as Rule['fee_order']})} className="ios-input mt-1 w-full rounded p-2"><option value="">请选择</option><option value="parallel">两项都按订单金额分别扣除</option><option value="sequential">先扣闲鱼币分润，再按剩余金额扣无忧卖</option></select></label>}

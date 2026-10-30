@@ -24,11 +24,13 @@ class SettlementTests(unittest.TestCase):
         self.client.close(); self.db.close(); self.temp.cleanup()
 
     def test_decimal_calculation_and_explicit_worry_free_base(self):
-        self.assertEqual(estimate_settlement('100', 1, ('percent',None,'20','0','')), Decimal('80.00'))
-        self.assertEqual(estimate_settlement('100', 1, ('percent',None,'20','10','parallel')), Decimal('70.00'))
-        self.assertEqual(estimate_settlement('100', 1, ('percent',None,'20','10','sequential')), Decimal('72.00'))
+        self.assertEqual(estimate_settlement('100', 1, ('percent',None,'20','0','')), Decimal('78.40'))
+        self.assertEqual(estimate_settlement('100', 1, ('percent',None,'20','10','parallel')), Decimal('68.40'))
+        self.assertEqual(estimate_settlement('100', 1, ('percent',None,'20','10','sequential')), Decimal('70.40'))
+        self.assertEqual(estimate_settlement('100', 1, ('percent',None,'0','0','')), Decimal('98.40'))
+        self.assertIsNone(estimate_settlement('100', 1, ('percent',None,'100','0','')))
         self.assertEqual(estimate_settlement('123', 3, ('fixed','12.35','0','0','')), Decimal('37.05'))
-        self.assertEqual(estimate_settlement('0.05', 1, ('percent',None,'30','0','')), Decimal('0.04'))
+        self.assertEqual(estimate_settlement('0.05', 1, ('percent',None,'30','0','')), Decimal('0.03'))
         self.assertIsNone(estimate_settlement('100', 1, ('percent',None,'20','10','')))
         self.assertIsNone(estimate_settlement('NaN', 1, ('percent',None,'20','0','')))
         self.assertIsNone(estimate_settlement('100', 1, None))
@@ -46,7 +48,7 @@ class SettlementTests(unittest.TestCase):
             self.db.conn.execute('INSERT INTO orders(order_id,cookie_id,item_id,order_status,amount,buy_num) VALUES(?,?,?,?,?,?)',row)
         self.db.conn.commit()
         stats=self.db.get_order_analytics(user_id=1,include_statuses=['pending_ship','shipped','completed'])['revenue_stats']
-        self.assertEqual(stats['estimated_settlement'],120.0)
+        self.assertEqual(stats['estimated_settlement'],117.6)
         self.assertEqual(stats['estimated_settlement_orders'],2)
         self.assertEqual(stats['unconfigured_settlement_orders'],1)
         backup=self.db.export_backup(user_id=1)

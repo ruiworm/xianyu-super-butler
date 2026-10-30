@@ -3,6 +3,8 @@ from decimal import Decimal, DecimalException, InvalidOperation, ROUND_HALF_UP
 
 CENT = Decimal('0.01')
 HUNDRED = Decimal(100)
+# 固定服务费按订单成交金额计算；固定到手金额已包含所有费用。
+SERVICE_RATE = Decimal('1.6')
 
 def _number(value):
     try:
@@ -33,13 +35,16 @@ def estimate_settlement(amount, quantity, rule):
         return None
     if worry > 0 and fee_order not in ('parallel', 'sequential'):
         return None
-    if fee_order == 'parallel' and coin + worry > HUNDRED:
+    if fee_order != 'sequential' and coin + worry + SERVICE_RATE > HUNDRED:
         return None
     try:
         if fee_order == 'sequential':
             value = amount * (HUNDRED - coin) / HUNDRED * (HUNDRED - worry) / HUNDRED
         else:
             value = amount * (HUNDRED - coin - worry) / HUNDRED
+        value -= amount * SERVICE_RATE / HUNDRED
+        if value < 0:
+            return None
         return value.quantize(CENT, rounding=ROUND_HALF_UP)
     except DecimalException:
         return None

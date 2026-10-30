@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import Dict, Any, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
+from app.settlement_math import SERVICE_RATE
 
 class SettlementRule(BaseModel):
     mode: Literal['fixed', 'percent']
@@ -17,8 +18,11 @@ class SettlementRule(BaseModel):
             raise ValueError('请填写每件到手金额')
         if self.mode == 'percent' and self.worry_rate > 0 and not self.fee_order:
             raise ValueError('请选择无忧卖费用的计算方式')
-        if self.mode == 'percent' and self.fee_order == 'parallel' and self.coin_rate + self.worry_rate > 100:
-            raise ValueError('并列扣费比例合计不能超过100%')
+        if self.mode == 'percent':
+            remaining = ((Decimal(100) - self.coin_rate) * (Decimal(100) - self.worry_rate) / Decimal(100)
+                         if self.fee_order == 'sequential' else Decimal(100) - self.coin_rate - self.worry_rate)
+            if remaining < SERVICE_RATE:
+                raise ValueError('分润和服务费合计不能超过订单金额')
         return self
 
 def create_settlement_router(auth, db):
